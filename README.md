@@ -8,7 +8,8 @@ Internal MYSense tool. Paste one website link and get a single report: what the 
 2. Wait about a minute. Pages are read slowly on purpose so the client's server is not loaded.
 3. Read the result top to bottom: Health Score, page speed, tech stack, strengths, findings, next steps.
 4. **Client PDF** is the version to share. **Internal PDF** adds the "Can we take it?" verdict, versions with confidence levels, and our package names. Do not send the internal one to clients.
-5. History keeps past scans in the browser you used. Scanning the same site again shows the previous Health Score for a before-and-after.
+5. **History** lists your own past scans. Once personal logins are live they are saved under your email, so you see the same list on any computer, and nobody else sees yours. Use **Remove** to delete one. Scanning the same site again shows the previous Health Score for a before-and-after.
+6. Admins get a **Show: Everyone's scans** switch on the History page, with a "Scanned by" column.
 
 "Not detected" and "Not measured" mean the site hides that detail. The tool does not guess.
 
@@ -26,7 +27,30 @@ Everything editable lives in `public/config.json`. Edit it on GitHub and the cha
 
 Verdict logic: any `none` item gives **Not a fit**; any `support` or unlisted item gives **Take with caution**; all `expert` gives **Can take**.
 
-## Passcode (who can open the tool)
+## Personal logins (built, not live yet)
+
+Each colleague signs in with their own work email through Cloudflare Access, and their scans are saved under that email in a Cloudflare D1 database. The code is in place and switches on by itself when the settings below exist. Until then the passcode in the next section applies.
+
+| Setting on the Worker | What it is |
+|---|---|
+| var `ACCESS_TEAM` | Your Zero Trust team name (the part before `.cloudflareaccess.com`). |
+| var `ACCESS_AUD` | The Application Audience (AUD) tag of the Access application. |
+| var `ADMIN_EMAILS` | Comma-separated emails that can see and remove everyone's scans. |
+| D1 binding `DB` | The database that holds saved scans (`schema.sql` creates the table). |
+
+Who can sign in is decided by the Access policy in Cloudflare, not by this code. Allow your company email domain. Never allow a public mail domain such as gmail.com.
+
+### Go-live checklist
+
+1. Sign up for **Zero Trust Free** in Cloudflare (needs a team name, may ask for a card on file).
+2. Worker `sensecheck` > **Access**: turn on Access for the production address, with a policy allowing emails ending in your company domain. Copy the AUD tag.
+3. Create a D1 database named `sensecheck`, run `schema.sql` in its console, and add it to `wrangler.jsonc` as `"d1_databases": [{ "binding": "DB", "database_name": "sensecheck", "database_id": "<id>" }]`.
+4. Add the vars `ACCESS_TEAM`, `ACCESS_AUD` and `ADMIN_EMAILS` to the Worker.
+5. Merge the `logins-dashboards` branch into `main` and push. Cloudflare deploys it.
+6. Sign in, run a scan, check it appears under History on a second browser, and remove it.
+7. Once that works, delete the `PASSCODE` secret. It is only the fallback.
+
+## Passcode (who can open the tool until logins are live)
 
 The whole tool sits behind one shared team passcode, stored as the secret `PASSCODE` on the Worker.
 
@@ -43,6 +67,7 @@ The whole tool sits behind one shared team passcode, stored as the secret `PASSC
   - `app.js`: scan flow, crawl, interface, chart and both PDF layouts.
   - `config.json`: the admin-editable rules above.
 - `src/worker.js` is the Cloudflare Worker. It serves `public/` and two API routes: `/api/fetch` (reads a public page) and `/api/psi` (Google PageSpeed Insights).
+- `schema.sql` creates the saved-scans table.
 - `dev.py` is a local stand-in for the Worker, for machines without Node.
 
 Only public pages are read. The tool never logs in, respects robots.txt, and stops at the page limit.
@@ -51,7 +76,7 @@ Only public pages are read. The tool never logs in, respects robots.txt, and sto
 
     PSI_KEY=your-google-key python3 dev.py 8788
 
-Then open http://127.0.0.1:8788. The local stand-in has no passcode. Without `PSI_KEY` the speed test hits Google's shared quota and fails; everything else still works.
+Then open http://127.0.0.1:8788. The local stand-in has no passcode and no real login: a "Local preview, signed in as" switch in the sidebar lets you pretend to be one of three colleagues (one is admin), and scans are kept in `.local/scans.json`. That switch does not exist on the real Worker. Without `PSI_KEY` the speed test hits Google's shared quota and fails; everything else still works.
 
 ## Deploy (Cloudflare Workers)
 
@@ -61,7 +86,7 @@ Then open http://127.0.0.1:8788. The local stand-in has no passcode. Without `PS
 
 ## Not built yet (from the brief)
 
-SSL certificate issuer and expiry, known-vulnerability lookups (WPScan API), shareable report links, team-wide history per client, user roles and an admin screen. The last four need a Cloudflare database.
+SSL certificate issuer and expiry, known-vulnerability lookups (WPScan API), shareable report links, a side-by-side compare of two scans, and an admin screen for editing the rules in the browser.
 
 ## Yearly upkeep
 

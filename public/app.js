@@ -2,10 +2,12 @@ import { detectStack, summarisePsi } from './analyze.js';
 import { readPage, buildIssues, healthOf, strengthsOf, skillsFit, nextSteps, verdictOf, norm, CATS, CAT_NAME } from './audit.js';
 
 const CFG = await fetch('config.json').then(r => r.json());
+// Who is signed in. The real Worker fills this from the Cloudflare Access login; the local stand-in pretends.
+const ME = await fetch('/api/me').then(r => (r.ok ? r.json() : {})).catch(() => ({}));
 const $ = (s, r = document) => r.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const view = $('#view'), nav = $('#nav');
-const S = { route: 'new', sec: 'overview', result: null, strategy: 'mobile', q: '', cat: 'all', more: false, busy: false, max: CFG.crawl.maxPages };
+const S = { route: 'new', sec: 'overview', result: null, strategy: 'mobile', q: '', cat: 'all', more: false, busy: false, max: CFG.crawl.maxPages, who: 'mine' };
 
 const I = {
   plus: '<path d="M12 5v14M5 12h14"/>',
@@ -35,17 +37,25 @@ const dotted = (t, text) => `<span class="imp"><i class="dot ${t}"></i>${text}</
 let toastT;
 function toast(msg) { const t = $('#toast'); t.textContent = msg; t.classList.add('on'); clearTimeout(toastT); toastT = setTimeout(() => t.classList.remove('on'), 3800); }
 
-// ---------- history (this browser only)
+// ---------- history
+// With a personal login the scans are saved on the server under the signed-in email (H.server). Without one
+// (shared passcode) they stay in this browser, as before. H.rows is the list currently shown.
 const KEY = 'sensecheck.history.v2';
-const hist = {
-  all() { try { return JSON.parse(localStorage.getItem(KEY)) || []; } catch { return []; } },
-  save(list) { try { localStorage.setItem(KEY, JSON.stringify(list.slice(0, 30))); } catch { /* storage unavailable */ } },
-  add(r) {
-    const strip = p => (p && !p.error ? { ...p, shot: '' } : p), old = this.all().find(x => x.domain === r.domain);
-    if (old && old.health) r.prev = { date: old.date, score: old.health.score };
-    this.save([{ ...r, psi: { mobile: strip(r.psi.mobile), desktop: strip(r.psi.desktop) } }, ...this.all().filter(x => x.domain !== r.domain)]);
+const sum = r => ({ id: r.id, by: r.by, domain: r.domain, date: r.date, health: { score: r.health ? r.health.score : null }, verdict: r.verdict, fit: r.fit, stack: { platform: r.stack && r.stack.platform } });
+const strip = r => { const cut = p => (p && !p.error ? { ...p, shot: '' } : p); return { ...r, psi: { mobile: cut(r.psi.mobile), desktop: cut(r.psi.desktop) } }; };
+const local = { all() { try { return JSON.parse(localStorage.getItem(KEY)) || []; } catch { return []; } }, save(l) { try { localStorage.setItem(KEY, JSON.stringify(l.slice(0, 30))); } catch { /* storage unavailable */ } } };
+const call = (path, opt) => fetch(path, opt).then(locked).then(r => (r.ok ? r.json() : Promise.reject(new Error('Could not reach the saved scans.'))));
+const H = {
+  server: !!ME.store, rows: [],
+  async load(all) { this.rows = this.server ? (await call('/api/scans' + (all ? '?all=1' : ''))).scans : local.all().map(sum); return this.rows; },
+  async get(id) { return this.server ? call('/api/scans/' + encodeURIComponent(id)) : local.all().find(x => String(x.id) === String(id)); },
+  async add(r) {
+    const mine = this.server ? (await call('/api/scans')).scans : local.all().map(sum), old = mine.find(x => x.domain === r.domain);
+    if (old && old.health && old.health.score != null) r.prev = { date: old.date, score: old.health.score };
+    if (this.server) r.id = (await call('/api/scans', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(strip(r)) })).id;
+    else local.save([strip(r), ...local.all().filter(x => x.domain !== r.domain)]);
   },
-  remove(id) { this.save(this.all().filter(x => String(x.id) !== String(id))); },
+  async remove(id) { if (this.server) await call('/api/scans/' + encodeURIComponent(id), { method: 'DELETE' }); else local.save(local.all().filter(x => String(x.id) !== String(id))); },
 };
 
 // ---------- API
@@ -205,7 +215,7 @@ async function runScan(raw, max = S.max) {
   r.fit = skillsFit(stack, CFG); r.steps = nextSteps(r, CFG); r.verdict = verdictOf(r);
   r.pagesChecked = pages.length;
   for (const k of ['pages', 'broken', 'bigImages', 'site']) delete r[k];
-  hist.add(r);
+  await H.add(r).catch(e => toast(e.message));
   open(r);
 }
 
@@ -230,22 +240,22 @@ function drawNav() {
     + '<hr>' + b('pdf-client', 'down', 'Client PDF', false, none) + b('pdf-internal', 'down', 'Internal PDF', false, none);
 }
 
-function historyCard(rows, title) {
-  return `<div class="card"><div class="card-head"><h3>${title}</h3></div><div class="tablewrap"><table>
-    <thead><tr><th>Site</th><th>Health</th><th>Verdict</th><th>Can we take it?</th><th>Platform</th><th>Scanned</th><th></th></tr></thead><tbody>
+function historyCard(rows, title, everyone) {
+  return `<div class="card"><div class="card-head"><h3>${title}</h3>${ME.admin && S.route === 'history' ? `<label class="pill soft">Show: <select id="who"><option value="mine">My scans</option><option value="all"${everyone ? ' selected' : ''}>Everyone\u2019s scans</option></select></label>` : ''}</div><div class="tablewrap"><table>
+    <thead><tr><th>Site</th><th>Health</th><th>Verdict</th><th>Can we take it?</th><th>Platform</th>${everyone ? '<th>Scanned by</th>' : ''}<th>Scanned</th><th></th></tr></thead><tbody>
     ${rows.map(r => `<tr>
       <td><b>${esc(r.domain)}</b></td>
       <td class="nw">${dotted(htone(r.health.score), r.health.score ?? 'No data')}</td>
-      <td>${dotted(r.verdict.tone, esc(r.verdict.label))}</td>
+      <td class="nw">${dotted(r.verdict.tone, esc(r.verdict.label))}</td>
       <td class="nw">${dotted(r.fit.tone, r.fit.verdict)}</td>
-      <td>${esc(r.stack.platform ? r.stack.platform.name : 'Not detected')}</td>
+      <td>${esc(r.stack.platform ? r.stack.platform.name : 'Not detected')}</td>${everyone ? `<td>${esc(r.by || '')}</td>` : ''}
       <td class="nw muted">${fmt(r.date)}</td>
       <td class="nw"><button type="button" class="link" data-open="${r.id}">Open</button><button type="button" class="link" data-remove="${r.id}">Remove</button></td></tr>`).join('')}
     </tbody></table></div></div>`;
 }
 
 function renderNew() {
-  const rows = hist.all().slice(0, 5), opts = [...new Set([1, 10, CFG.crawl.maxPages, 50])].sort((a, b) => a - b);
+  const rows = H.rows.slice(0, 5), opts = [...new Set([1, 10, CFG.crawl.maxPages, 50])].sort((a, b) => a - b);
   view.innerHTML = `
     <div class="top"><div class="crumb">SenseCheck<i>&rsaquo;</i><b>New scan</b></div></div>
     <div class="card start">
@@ -258,14 +268,15 @@ function renderNew() {
       </form>
       <div class="covers"><span><i class="dot m"></i>Tech stack and versions</span><span><i class="dot d"></i>Speed, SEO, content and security</span><span><i class="dot good"></i>Strengths and next steps</span></div>
     </div>
-    ${rows.length ? historyCard(rows, 'Recent scans') : ''}`;
+    ${rows.length ? historyCard(rows, H.server ? 'My recent scans' : 'Recent scans') : ''}`;
   const u = $('#u'); if (u && window.matchMedia('(min-width: 821px)').matches) u.focus();
 }
 
 function renderHistory() {
-  const rows = hist.all();
+  const rows = H.rows, all = S.who === 'all' && ME.admin;
   view.innerHTML = `<div class="top"><div class="crumb">SenseCheck<i>&rsaquo;</i><b>History</b></div></div>
-    ${rows.length ? historyCard(rows, 'Past scans on this browser') : '<div class="card"><p class="empty">No scans yet. Run your first check from New scan.</p></div>'}`;
+    ${rows.length || ME.admin ? historyCard(rows, all ? 'Everyone\u2019s scans' : H.server ? 'My scans' : 'Past scans on this browser', all) : ''}
+    ${rows.length ? '' : '<div class="card"><p class="empty">No scans yet. Run your first check from New scan.</p></div>'}`;
 }
 
 function renderScan(domain) {
@@ -458,11 +469,20 @@ function printReport(mode) {
 }
 
 // ---------- routing and events
-function render() {
+async function render() {
   drawNav();
-  if (S.route === 'result' && S.result) renderResult();
-  else if (S.route === 'history') renderHistory();
-  else if (S.route !== 'scan') renderNew();
+  if (S.route === 'result' && S.result) return renderResult();
+  if (S.route === 'scan') return;
+  const route = S.route;
+  await H.load(route === 'history' && S.who === 'all' && ME.admin).catch(e => { H.rows = []; toast(e.message); });
+  if (S.route !== route) return; // the user moved on while the list was loading
+  if (route === 'history') renderHistory(); else renderNew();
+}
+
+// Sidebar footer: who is signed in. The switcher only exists on the local stand-in (ME.local).
+function drawUser() {
+  const el = $('#user'), name = ME.email || 'MYSense';
+  el.innerHTML = `<span class="avatar">${esc(name.slice(0, 2).toUpperCase())}</span><span class="me"><b title="${esc(name)}">${esc(name)}</b><small>${ME.email ? (ME.admin ? 'Admin' : 'Signed in') : 'Sales tools'}</small>${ME.local ? `<label class="dev">Local preview, signed in as<select id="devuser">${ME.users.map(u => `<option${u === ME.email ? ' selected' : ''}>${esc(u)}</option>`).join('')}</select></label>` : ''}</span>`;
 }
 function go(to) {
   if (to.startsWith('pdf-')) return printReport(to.slice(4));
@@ -478,8 +498,8 @@ document.addEventListener('click', e => {
   const t = e.target.closest('[data-go],[data-open],[data-remove],[data-rescan],#more');
   if (!t) return;
   if (t.dataset.go) { e.preventDefault(); go(t.dataset.go); }
-  else if (t.dataset.open) { const r = hist.all().find(x => String(x.id) === t.dataset.open); if (r) open(r); }
-  else if (t.dataset.remove) { hist.remove(t.dataset.remove); render(); }
+  else if (t.dataset.open) H.get(t.dataset.open).then(r => r && open(r)).catch(e => toast(e.message));
+  else if (t.dataset.remove) H.remove(t.dataset.remove).then(render).catch(e => toast(e.message));
   else if ('rescan' in t.dataset) runScan(S.result.url);
   else if (t.id === 'more') { S.more = !S.more; drawRows(); }
 });
@@ -488,7 +508,10 @@ document.addEventListener('change', e => {
   if (e.target.id === 'strat') { S.strategy = e.target.value; renderResult(); }
   if (e.target.id === 'cat') { S.cat = e.target.value; S.more = false; drawRows(); }
   if (e.target.id === 'max') S.max = +e.target.value;
+  if (e.target.id === 'who') { S.who = e.target.value; render(); }
+  if (e.target.id === 'devuser' && ME.local) fetch('/api/dev-login?as=' + encodeURIComponent(e.target.value), { method: 'POST' }).then(() => location.reload());
 });
 document.addEventListener('input', e => { if (e.target.id === 'q') { S.q = e.target.value; drawRows(); } });
 
+drawUser();
 render();

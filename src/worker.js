@@ -1,7 +1,13 @@
-// SenseCheck Worker. It runs in front of every request (run_worker_first), so the whole tool sits behind a team passcode.
-//   secret PASSCODE   the shared team passcode. Until it is set, the site stays locked for everyone.
+// SenseCheck Worker. It runs in front of every request (run_worker_first), so nothing is reachable without signing in.
+// Two ways in, chosen by which settings exist:
+//   1. Cloudflare Access (personal logins). Set vars ACCESS_TEAM and ACCESS_AUD. Each person signs in with their own
+//      email, and their scans are saved under it in the D1 database bound as DB. ADMIN_EMAILS (comma-separated) see all.
+//   2. Shared passcode (fallback when the Access vars are absent). Secret PASSCODE; history stays in each browser.
 //   secret PSI_KEY    Google PageSpeed Insights API key.
-// Once unlocked:
+// Once signed in:
+//   /api/me                   who is signed in, and whether scans are saved on the server
+//   /api/scans                GET my scans (?all=1 for admins), POST a new one
+//   /api/scans/<id>           GET one scan, DELETE it (owner or admin only)
 //   /api/fetch?url=           streams a public page back as plain text, with metadata in a header
 //   /api/fetch?url=&head=1    returns only the metadata (used to read image file sizes)
 //   /api/psi?url=&strategy=   proxies Google PageSpeed Insights and adds the API key
@@ -21,7 +27,81 @@ const KEEP = ['server', 'x-powered-by', 'x-generator', 'via', 'cf-ray', 'cf-cach
 
 const json = (body, status = 200, extra = {}) => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json', 'cache-control': 'no-store', ...extra } });
 
-// ---------- passcode gate
+// ---------- Cloudflare Access login
+// Access puts a signed token on every request it lets through. We check the signature, audience, issuer and expiry
+// ourselves, so a forged "I am this user" header can never get in, even if Access is switched off by mistake.
+let KEYS = null, KEYS_AT = 0;
+const b64u = s => Uint8Array.from(atob(s.replace(/-/g, '+').replace(/_/g, '/').padEnd(Math.ceil(s.length / 4) * 4, '=')), c => c.charCodeAt(0));
+const teamOf = env => String(env.ACCESS_TEAM).replace(/^https?:\/\//, '').replace(/\.cloudflareaccess\.com\/?$/, '');
+const adminsOf = env => String(env.ADMIN_EMAILS || '').toLowerCase().split(/[\s,]+/).filter(Boolean);
+
+async function accessKeys(team, fresh) {
+  if (KEYS && !fresh && Date.now() - KEYS_AT < 3600000) return KEYS;
+  const j = await (await fetch(`https://${team}.cloudflareaccess.com/cdn-cgi/access/certs`)).json();
+  const keys = {};
+  for (const k of j.keys || []) keys[k.kid] = await crypto.subtle.importKey('jwk', k, { name: 'RSASSA-PKCS1-v1_5', hash: 'SHA-256' }, false, ['verify']);
+  KEYS = keys; KEYS_AT = Date.now();
+  return keys;
+}
+
+// Returns the signed-in email, or null when the token is missing or fails any check.
+async function accessUser(request, env) {
+  const p = (request.headers.get('cf-access-jwt-assertion') || '').split('.');
+  if (p.length !== 3) return null;
+  let head, body;
+  try { const dec = new TextDecoder(); head = JSON.parse(dec.decode(b64u(p[0]))); body = JSON.parse(dec.decode(b64u(p[1]))); } catch { return null; }
+  if (head.alg !== 'RS256' || !head.kid) return null;
+  const team = teamOf(env);
+  let key = (await accessKeys(team))[head.kid];
+  if (!key) key = (await accessKeys(team, true))[head.kid]; // keys rotate
+  if (!key) return null;
+  const ok = await crypto.subtle.verify('RSASSA-PKCS1-v1_5', key, b64u(p[2]), new TextEncoder().encode(p[0] + '.' + p[1]));
+  if (!ok || ![].concat(body.aud || []).includes(env.ACCESS_AUD) || !(body.exp > Date.now() / 1000)) return null;
+  if (body.iss !== `https://${team}.cloudflareaccess.com` || typeof body.email !== 'string' || !body.email) return null;
+  return body.email.toLowerCase();
+}
+
+// ---------- saved scans (D1)
+const summaryOf = r => ({ domain: r.domain, date: r.date, health: { score: r.health ? r.health.score : null },
+  verdict: { tone: (r.verdict || {}).tone || 'info', label: String((r.verdict || {}).label || '') },
+  fit: { tone: (r.fit || {}).tone || 'info', verdict: String((r.fit || {}).verdict || '') },
+  stack: { platform: { name: String((((r.stack || {}).platform) || {}).name || 'Not detected') } } });
+
+async function scans(request, env, url, me) {
+  if (!env.DB || !me.email) return json({ error: 'no-store' }, 501);
+  const id = url.pathname.length > '/api/scans/'.length ? decodeURIComponent(url.pathname.slice('/api/scans/'.length)) : '', m = request.method;
+  if (!id && m === 'GET') {
+    const all = url.searchParams.has('all') && me.admin;
+    const q = all ? env.DB.prepare('SELECT id, email, summary FROM scans ORDER BY created_at DESC LIMIT 300')
+      : env.DB.prepare('SELECT id, email, summary FROM scans WHERE email = ? ORDER BY created_at DESC LIMIT 200').bind(me.email);
+    const { results } = await q.all();
+    return json({ scans: (results || []).map(x => ({ ...JSON.parse(x.summary), id: x.id, by: x.email })) });
+  }
+  if (!id && m === 'POST') {
+    const text = await request.text();
+    if (text.length > 600000) return json({ error: 'too large' }, 413);
+    let r;
+    try { r = JSON.parse(text); } catch { return json({ error: 'bad request' }, 400); }
+    if (!r || typeof r.domain !== 'string' || !r.domain || !r.health || !r.verdict || !Array.isArray(r.issues)) return json({ error: 'bad request' }, 400);
+    for (const k of ['mobile', 'desktop']) if (r.psi && r.psi[k] && r.psi[k].shot) r.psi[k].shot = '';
+    delete r.id; delete r.by;
+    const sid = crypto.randomUUID(), now = new Date().toISOString();
+    await env.DB.prepare('INSERT INTO scans (id, email, domain, created_at, summary, result) VALUES (?, ?, ?, ?, ?, ?)')
+      .bind(sid, me.email, r.domain.slice(0, 200), now, JSON.stringify(summaryOf(r)), JSON.stringify(r)).run();
+    return json({ id: sid });
+  }
+  if (id && (m === 'GET' || m === 'DELETE')) {
+    const row = await env.DB.prepare('SELECT email, result FROM scans WHERE id = ?').bind(id).first();
+    if (!row) return json({ error: 'not found' }, 404);
+    if (row.email !== me.email && !me.admin) return json({ error: 'forbidden' }, 403);
+    if (m === 'GET') return json({ ...JSON.parse(row.result), id, by: row.email });
+    await env.DB.prepare('DELETE FROM scans WHERE id = ?').bind(id).run();
+    return json({ ok: true });
+  }
+  return json({ error: 'not allowed' }, 405);
+}
+
+// ---------- passcode gate (fallback)
 // The cookie holds an HMAC of the passcode, never the passcode itself. Changing the passcode signs everyone out.
 async function tokenFor(pass) {
   if (!pass) return ''; // an empty passcode never matches
@@ -125,12 +205,23 @@ async function psi(u, strategy, env) {
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
-    const stop = await gate(request, env, url);
-    if (stop) return stop;
-    if (!url.pathname.startsWith('/api/')) return env.ASSETS.fetch(request);
-    if (request.method !== 'GET') return json({ error: 'GET only' }, 405);
+    const api = url.pathname.startsWith('/api/');
+    let me = { email: null, admin: false };
+    if (env.ACCESS_TEAM && env.ACCESS_AUD) {
+      const email = await accessUser(request, env).catch(() => null);
+      if (!email) return api ? json({ error: 'sign-in required' }, 401, { 'x-sc-locked': '1' })
+        : lockPage(401, 'Sign in with your work email through Cloudflare Access to use this tool.', false);
+      me = { email, admin: adminsOf(env).includes(email) };
+    } else {
+      const stop = await gate(request, env, url);
+      if (stop) return stop;
+    }
+    if (!api) return env.ASSETS.fetch(request);
     // Only the app itself may call the API (browsers always send this header on https).
     if (request.headers.get('sec-fetch-site') !== 'same-origin') return json({ error: 'forbidden' }, 403);
+    if (url.pathname === '/api/me') return json({ email: me.email, admin: me.admin, store: !!(env.DB && me.email) });
+    if (url.pathname === '/api/scans' || url.pathname.startsWith('/api/scans/')) return scans(request, env, url, me);
+    if (request.method !== 'GET') return json({ error: 'GET only' }, 405);
     const u = target(url.searchParams.get('url') || '');
     if (!u) return json({ error: 'Enter a public website address' }, 400);
     if (url.pathname === '/api/fetch') return proxy(u, url.searchParams.has('head'));
