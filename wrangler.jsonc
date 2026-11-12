@@ -2,6 +2,7 @@
   "name": "sensecheck",
   "main": "src/worker.js",
   "compatibility_date": "2026-06-01",
-  "assets": { "directory": "./public", "binding": "ASSETS" },
+  // run_worker_first sends every request through the Worker, so the passcode gate covers the app files too.
+  "assets": { "directory": "./public", "binding": "ASSETS", "run_worker_first": true },
   "observability": { "enabled": true }
 }

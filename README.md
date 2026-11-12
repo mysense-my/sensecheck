@@ -26,6 +26,15 @@ Everything editable lives in `public/config.json`. Edit it on GitHub and the cha
 
 Verdict logic: any `none` item gives **Not a fit**; any `support` or unlisted item gives **Take with caution**; all `expert` gives **Can take**.
 
+## Passcode (who can open the tool)
+
+The whole tool sits behind one shared team passcode, stored as the secret `PASSCODE` on the Worker.
+
+- **Set or change it:** Cloudflare > Workers & Pages > `sensecheck` > Settings > Variables and Secrets > add or edit the secret `PASSCODE`, then deploy. Use at least 12 characters.
+- **Until it is set, the site is locked for everyone.** That is deliberate.
+- A browser stays unlocked for 30 days. Changing the passcode signs everyone out. Visiting `/logout` locks one browser.
+- The passcode is shared, so change it when someone leaves the team. For per-person logins, move to Cloudflare Access (needs a Zero Trust plan).
+
 ## How it is put together
 
 - `public/` is the app (plain HTML, CSS and JS, no build step).
@@ -42,14 +51,13 @@ Only public pages are read. The tool never logs in, respects robots.txt, and sto
 
     PSI_KEY=your-google-key python3 dev.py 8788
 
-Then open http://127.0.0.1:8788. Without `PSI_KEY` the speed test hits Google's shared quota and fails; everything else still works.
+Then open http://127.0.0.1:8788. The local stand-in has no passcode. Without `PSI_KEY` the speed test hits Google's shared quota and fails; everything else still works.
 
 ## Deploy (Cloudflare Workers)
 
 1. Push this folder to a GitHub repository.
 2. In Cloudflare: Workers & Pages > Create > import the repository. Deploy command: `npx wrangler deploy`.
-3. Add the secret `PSI_KEY` (a Google API key with the PageSpeed Insights API enabled).
-4. Put Cloudflare Access in front of the hostname so only the team can open it.
+3. Add two secrets: `PASSCODE` (the team passcode) and `PSI_KEY` (a Google API key with the PageSpeed Insights API enabled).
 
 ## Not built yet (from the brief)
 

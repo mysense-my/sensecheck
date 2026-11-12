@@ -49,8 +49,10 @@ const hist = {
 };
 
 // ---------- API
+// A 'locked' reply means the passcode session ended, so reload to show the unlock screen.
+const locked = r => { if (r.headers.get('x-sc-locked')) { location.reload(); throw new Error('SenseCheck is locked. Enter the passcode again.'); } return r; };
 async function via(url) {
-  const r = await fetch('/api/fetch?url=' + encodeURIComponent(url));
+  const r = locked(await fetch('/api/fetch?url=' + encodeURIComponent(url)));
   if (!r.ok) { const j = await r.json().catch(() => ({})); throw new Error(j.error === 'unreachable' ? 'Could not connect to the site' : j.error || 'Request failed'); }
   const meta = JSON.parse(decodeURIComponent(r.headers.get('x-sc-meta') || '%7B%7D'));
   return { headers: {}, cookies: [], ...meta, html: await r.text() };
@@ -60,7 +62,7 @@ const peek = x => fetch('/api/fetch?head=1&url=' + encodeURIComponent(x)).then(r
 const body = (p, n = 1e7) => (p && p.status === 200 ? p.html.slice(0, n) : '');
 async function pool(items, size, fn) { const out = []; for (let i = 0; i < items.length; i += size) out.push(...await Promise.all(items.slice(i, i + size).map(fn))); return out; }
 async function psi(url, strategy) {
-  const r = await fetch(`/api/psi?url=${encodeURIComponent(url)}&strategy=${strategy}`);
+  const r = locked(await fetch(`/api/psi?url=${encodeURIComponent(url)}&strategy=${strategy}`));
   const j = await r.json().catch(() => null);
   if (!r.ok || !j || j.error) {
     const m = (j && j.error && (j.error.message || j.error)) || 'Speed test failed';
