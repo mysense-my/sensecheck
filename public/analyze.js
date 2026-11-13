@@ -264,5 +264,7 @@ export function summarisePsi(j) {
     const g = k => le.metrics[k] ? { value: le.metrics[k].percentile, rating: le.metrics[k].category } : null;
     field = { overall: le.overall_category || '', origin: le !== j.loadingExperience || !!le.origin_fallback, lcp: g('LARGEST_CONTENTFUL_PAINT_MS'), inp: g('INTERACTION_TO_NEXT_PAINT'), cls: g('CUMULATIVE_LAYOUT_SHIFT_SCORE') };
   }
-  return { scores, metrics, wins, field, shot: (A['final-screenshot'] && A['final-screenshot'].details && A['final-screenshot'].details.data) || '', packs: (lh.stackPacks || []).map(p => p.title), weight: A['total-byte-weight'] && A['total-byte-weight'].numericValue ? Math.round(A['total-byte-weight'].numericValue / 1024) : null };
+  const cnt = id => (A[id] && A[id].score != null && A[id].score < 1 ? ((A[id].details && A[id].details.items) || []).length || 1 : 0);
+  const design = { contrast: cnt('color-contrast'), taps: cnt('target-size'), stretched: cnt('image-aspect-ratio'), blurry: cnt('image-size-responsive') };
+  return { design, scores, metrics, wins, field, shot: (A['final-screenshot'] && A['final-screenshot'].details && A['final-screenshot'].details.data) || '', packs: (lh.stackPacks || []).map(p => p.title), weight: A['total-byte-weight'] && A['total-byte-weight'].numericValue ? Math.round(A['total-byte-weight'].numericValue / 1024) : null };
 }

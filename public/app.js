@@ -1,5 +1,5 @@
 import { detectStack, summarisePsi } from './analyze.js';
-import { readPage, buildIssues, healthOf, strengthsOf, skillsFit, nextSteps, verdictOf, norm, CATS, CAT_NAME } from './audit.js';
+import { readPage, buildIssues, healthOf, strengthsOf, skillsFit, nextSteps, verdictOf, designOf as designVerdict, norm, CATS, CAT_NAME } from './audit.js';
 
 const CFG = await fetch('config.json').then(r => r.json());
 // Who is signed in. The real Worker fills this from the Cloudflare Access login; the local stand-in pretends.
@@ -14,6 +14,7 @@ const I = {
   grid: '<rect x="4" y="4" width="6.5" height="6.5" rx="1.5"/><rect x="13.5" y="4" width="6.5" height="6.5" rx="1.5"/><rect x="4" y="13.5" width="6.5" height="6.5" rx="1.5"/><rect x="13.5" y="13.5" width="6.5" height="6.5" rx="1.5"/>',
   gauge: '<path d="M4.5 17a8.5 8.5 0 1 1 15 0"/><path d="M12 13l4-4.5"/>',
   layers: '<path d="M12 4l8 4.5-8 4.5-8-4.5z"/><path d="M4 13l8 4.5 8-4.5"/>',
+  layout: '<rect x="4" y="4" width="16" height="16" rx="2.5"/><path d="M4 9.5h16M9.5 9.5V20"/>',
   list: '<path d="M9 7h11M9 12h11M9 17h11"/><path d="M4.5 7h.01M4.5 12h.01M4.5 17h.01"/>',
   flag: '<path d="M6 20V5M6 5h11l-2 4 2 4H6"/>',
   clock: '<circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/>',
@@ -199,6 +200,7 @@ async function runScan(raw, max = S.max) {
     step('pages', 'run');
     ({ pages, broken } = await crawl(page, max, site.disallow, n => step('pages', 'run', `${n} of up to ${max}`)));
     const urls = pages[0].imgUrls, sizes = await pool(urls, 3, peek);
+    if (!pages[0].design.favicon) site.favicon = ((await peek(origin + '/favicon.ico')) || {}).status === 200;
     bigImages = sizes.map((m, i) => ({ url: urls[i], kb: m && m.headers ? Math.round((+m.headers['content-length'] || 0) / 1024) : 0 })).filter(b => b.kb > CFG.thresholds.imageKB);
     step('pages', 'done', `${pages.length} ${pages.length === 1 ? 'page' : 'pages'}`);
   } else step('pages', 'fail', 'Skipped');
@@ -211,7 +213,7 @@ async function runScan(raw, max = S.max) {
     if (packs.length) stack.verdict.reasons.unshift(`Google\u2019s test detected: ${packs.join(', ')}.`);
   }
   const r = { id: Date.now(), url: page.finalUrl || u.href, domain, date: new Date().toISOString(), blocked, stack, psi: { mobile, desktop }, pages, broken, bigImages, site };
-  r.issues = buildIssues(r, CFG); r.health = healthOf(r); r.strengths = strengthsOf(r);
+  r.issues = buildIssues(r, CFG); r.health = healthOf(r); r.strengths = strengthsOf(r); r.design = designVerdict(r);
   r.fit = skillsFit(stack, CFG); r.steps = nextSteps(r, CFG); r.verdict = verdictOf(r);
   r.pagesChecked = pages.length;
   for (const k of ['pages', 'broken', 'bigImages', 'site']) delete r[k];
@@ -221,7 +223,6 @@ async function runScan(raw, max = S.max) {
 
 function open(r) {
   S.result = r; S.route = 'result'; S.sec = 'overview'; S.q = ''; S.cat = 'all'; S.more = false;
-  S.strategy = !good(r.psi.mobile) && good(r.psi.desktop) ? 'desktop' : 'mobile';
   render();
   window.scrollTo(0, 0);
 }
@@ -233,6 +234,7 @@ function drawNav() {
   nav.innerHTML = b('new', 'plus', 'New scan', S.route === 'new' || S.route === 'scan')
     + b('overview', 'grid', 'Overview', res && S.sec === 'overview', none)
     + b('speed', 'gauge', 'Page speed', res && S.sec === 'speed', none)
+    + b('design', 'layout', 'Design', res && S.sec === 'design', none)
     + b('stack', 'layers', 'Tech stack', res && S.sec === 'stack', none)
     + b('findings', 'list', 'Findings', res && S.sec === 'findings', none)
     + b('steps', 'flag', 'Next steps', res && S.sec === 'steps', none)
@@ -301,21 +303,27 @@ function renderFail(domain, why) {
 const reasons = list => `<ul>${list.map(x => `<li>${esc(x)}</li>`).join('')}</ul>`;
 const stepsHtml = (r, pkg) => GROUPS.map(([k, t]) => `<div><h4>${t}</h4>${r.steps[k].length ? `<ul>${r.steps[k].map(x => `<li>${esc(x.text)}${pkg ? `<br><span class="chip">${esc(x.pkg)}</span>` : ''}</li>`).join('')}</ul>` : '<p class="muted">Nothing needed.</p>'}</div>`).join('');
 
+const LEGEND = '<div class="legend"><span><i class="dot m"></i>Mobile</span><span><i class="dot d"></i>Desktop</span></div>';
+const scoreGroups = (m, d) => LH.map(([k, n]) => ({ short: n, name: n, m: m && { score: m.scores[k], display: String(m.scores[k] ?? '–') }, d: d && { score: d.scores[k], display: String(d.scores[k] ?? '–') } }));
+const speedGroups = (m, d) => (m || d).metrics.map((x, i) => ({ short: x.short, name: `${x.name} (${x.short})`, m: m && m.metrics[i], d: d && d.metrics[i] }));
+const designOf = r => r.design || { tone: 'info', label: 'Not checked in this scan', note: 'Scan again to run the design checks.' };
+
 function renderResult() {
-  const r = S.result, p = good(r.psi[S.strategy]), m = good(r.psi.mobile), d = good(r.psi.desktop), v = r.stack.verdict, h = r.health;
-  const perr = r.psi[S.strategy] && r.psi[S.strategy].error;
-  const f = p && p.field, fr = x => ({ FAST: 'good', AVERAGE: 'warn', SLOW: 'bad' }[x && x.rating] || 'info');
-  const groups = [...new Set(r.stack.items.map(i => i.group))];
+  const r = S.result, m = good(r.psi.mobile), d = good(r.psi.desktop), any = m || d, v = r.stack.verdict, h = r.health, dz = designOf(r);
+  const perr = (r.psi.mobile && r.psi.mobile.error) || (r.psi.desktop && r.psi.desktop.error) || '';
+  const f = (m && m.field) || (d && d.field), fr = x => ({ FAST: 'good', AVERAGE: 'warn', SLOW: 'bad' }[x && x.rating] || 'info');
+  const groups = [...new Set(r.stack.items.map(i => i.group))], looks = r.issues.filter(i => i.cat === 'Design');
+  const val = (p, i) => (p ? dotted(tone(p.metrics[i].score), esc(p.metrics[i].display || '–')) : '–');
+  const kb = p => (p && p.weight ? (p.weight / 1024).toFixed(1) + ' MB' : '–');
   view.innerHTML = `
     <div class="top">
       <div class="crumb">Scans<i>&rsaquo;</i><b>${esc(r.domain)}</b></div>
-      <div class="top-r"><button type="button" class="link" data-rescan>Scan again</button>
-      <label class="pill">Show: <select id="strat"><option value="mobile"${S.strategy === 'mobile' ? ' selected' : ''}>Mobile</option><option value="desktop"${S.strategy === 'desktop' ? ' selected' : ''}>Desktop</option></select></label></div>
+      <div class="top-r"><button type="button" class="link" data-rescan>Scan again</button></div>
     </div>
 
     <div class="card hero3" id="sec-overview">
       <div class="col who">
-        ${p && p.shot ? `<div class="shot"><img src="${esc(p.shot)}" alt="Screenshot of ${esc(r.domain)} on ${S.strategy}"></div>` : `<div class="shot empty">${esc(r.domain[0].toUpperCase())}</div>`}
+        ${(d && d.shot) || (m && m.shot) ? `<div class="shots">${d && d.shot ? `<img src="${esc(d.shot)}" alt="Desktop screenshot of ${esc(r.domain)}">` : ''}${m && m.shot ? `<img src="${esc(m.shot)}" alt="Mobile screenshot of ${esc(r.domain)}">` : ''}</div>` : `<div class="shot empty">${esc(r.domain[0].toUpperCase())}</div>`}
         <h2>${esc(r.domain)}</h2>
         <p class="tone ${r.verdict.tone}">${esc(r.verdict.label)}</p>
         <button class="btn primary" type="button" data-go="pdf-client">${icon('down')}Client PDF</button>
@@ -323,26 +331,39 @@ function renderResult() {
       </div>
       <div class="col">
         <span class="label">Website health</span>
-        <div class="health"><b>${h.score ?? '\u2013'}</b><span>out of 100</span></div>
+        <div class="health"><b>${h.score ?? '–'}</b><span>out of 100</span></div>
         ${r.prev && r.prev.score != null ? `<p class="prev">Was ${r.prev.score} on ${fmt(r.prev.date)}</p>` : ''}
         <div class="rows">${CATS.map(c => `<div class="row"><i class="dot ${htone(h.sub[c])}"></i>${CAT_NAME[c]}<b>${h.sub[c] ?? '<small>Not measured</small>'}</b></div>`).join('')}</div>
       </div>
       <div class="col chartcol">
-        <div class="chart-head"><h3>Speed by metric</h3><div class="legend"><span><i class="dot m"></i>Mobile</span><span><i class="dot d"></i>Desktop</span></div></div>
-        <span class="label">Score out of 100, higher is better</span>
-        ${m || d ? '<div class="chart" id="chart"></div>' : `<p class="note" style="margin-top:16px">Speed test unavailable. ${esc(perr || '')}</p>`}
+        <div class="chart-head"><h3>Scores by device</h3>${LEGEND}</div>
+        <span class="label">Google Lighthouse, out of 100</span>
+        ${any ? '<div class="chart" id="chart-scores"></div>' : `<p class="note" style="margin-top:16px">Speed test unavailable. ${esc(perr)}</p>`}
       </div>
       <p class="summary"><b>In short:</b> ${esc(r.verdict.summary)} <span class="muted">${r.pagesChecked ? `${r.pagesChecked} ${r.pagesChecked === 1 ? 'page' : 'pages'} checked.` : ''}</span></p>
     </div>
 
     <div class="card" id="sec-speed">
-      <div class="card-head"><h3>Page speed</h3><span class="muted">Google Lighthouse test on ${S.strategy}, ${fmt(r.date)}</span></div>
-      ${p ? `<div class="tiles">${p.metrics.map(x => `<div class="tile"><span class="label">${x.name}</span><b>${esc(x.display || '\u2013')}</b><span class="st"><i class="dot ${tone(x.score)}"></i>${word(x.score)}</span></div>`).join('')}</div>
-        <div class="field-data">${LH.map(([k, n]) => `<span><i class="dot ${tone(p.scores[k])}"></i>${n} <b>${p.scores[k] ?? '\u2013'}</b></span>`).join('')}${p.weight ? `<span>Page weight <b>${(p.weight / 1024).toFixed(1)} MB</b></span>` : ''}</div>
+      <div class="card-head"><h3>Page speed</h3><span class="muted">Google Lighthouse test on mobile and desktop, ${fmt(r.date)}</span></div>
+      ${any ? `<div class="speed2">
+          <div><div class="chart-head"><span class="label">Speed by metric, score out of 100</span>${LEGEND}</div><div class="chart" id="chart-speed"></div></div>
+          <div class="tablewrap"><table class="mini"><thead><tr><th>Measure</th><th>Mobile</th><th>Desktop</th></tr></thead><tbody>
+            ${any.metrics.map((x, i) => `<tr><td><b>${x.name}</b> <span class="muted">${x.short}</span></td><td class="nw">${val(m, i)}</td><td class="nw">${val(d, i)}</td></tr>`).join('')}
+            <tr><td><b>Page weight</b></td><td class="nw">${kb(m)}</td><td class="nw">${kb(d)}</td></tr>
+          </tbody></table></div>
+        </div>
         <div class="field-data">${f && f.lcp ? `<span><b>Real visitors</b>&nbsp;on Chrome, last 28 days${f.origin ? ' (whole site)' : ''}</span>
           <span><i class="dot ${fr(f.lcp)}"></i>Main content (LCP) <b>${(f.lcp.value / 1000).toFixed(1)} s</b></span>
           ${f.inp ? `<span><i class="dot ${fr(f.inp)}"></i>Responsiveness (INP) <b>${f.inp.value} ms</b></span>` : ''}
-          ${f.cls ? `<span><i class="dot ${fr(f.cls)}"></i>Layout shift (CLS) <b>${(f.cls.value / 100).toFixed(2)}</b></span>` : ''}` : '<span>Google has no real-visitor data for this site yet, which usually means low traffic.</span>'}</div>` : `<p class="note">No ${S.strategy} speed data. ${esc(perr || '')}</p>`}
+          ${f.cls ? `<span><i class="dot ${fr(f.cls)}"></i>Layout shift (CLS) <b>${(f.cls.value / 100).toFixed(2)}</b></span>` : ''}` : '<span>Google has no real-visitor data for this site yet, which usually means low traffic.</span>'}</div>` : `<p class="note">No speed data. ${esc(perr)}</p>`}
+    </div>
+
+    <div class="card" id="sec-design">
+      <div class="card-head"><h3>Design</h3><span class="muted">Checks for a dated or broken look</span></div>
+      <div class="stack">
+        <div><span class="label">Verdict</span><h4>${dotted(dz.tone, esc(dz.label))}</h4><p class="ink2" style="margin-top:10px">${esc(dz.note)}</p></div>
+        <div>${looks.length ? `<ul class="goodlist one">${looks.map(x => `<li><i class="dot ${SEV[x.sev]}"></i><span>${esc(x.title)}</span></li>`).join('')}</ul>` : `<p class="note">${dz.tone === 'info' ? 'No design findings.' : 'The checks found nothing dated or broken.'}</p>`}</div>
+      </div>
     </div>
 
     <div class="card" id="sec-stack">
@@ -375,7 +396,7 @@ function renderResult() {
       <div class="card-head"><h3>Recommended next steps</h3><span class="muted">Each one maps to a service package</span></div>
       <div class="steps3">${stepsHtml(r, true)}</div>
     </div>`;
-  if (m || d) drawChart($('#chart'), m, d);
+  if (any) { drawChart($('#chart-scores'), scoreGroups(m, d), { labels: true, bw: 22 }); drawChart($('#chart-speed'), speedGroups(m, d)); }
   drawRows();
 }
 
@@ -389,26 +410,33 @@ function drawRows() {
   const more = $('#more'); more.hidden = list.length <= 8; more.textContent = S.more ? 'View less' : `View more (${list.length - 8})`;
 }
 
-// Grouped bars: metric score out of 100, mobile next to desktop. Values are in the tooltip and the Page speed card.
-function drawChart(el, m, d) {
-  const W = 520, Hh = 270, L = 34, R = 6, T = 14, B = 32, pw = W - L - R, ph = Hh - T - B, bw = 14;
-  const base = (m || d).metrics, y = v => T + ph - (v / 100) * ph, gw = pw / base.length;
-  const bar = (x, s, k) => { if (s == null) return ''; const h = Math.max(3, (s / 100) * ph), r = Math.min(4, h), yy = y(0) - h; return `<path class="bar ${k}" d="M${x},${y(0)}V${yy + r}Q${x},${yy} ${x + r},${yy}H${x + bw - r}Q${x + bw},${yy} ${x + bw},${yy + r}V${y(0)}Z"/>`; };
-  let s = `<svg viewBox="0 0 ${W} ${Hh}" role="img" aria-label="Speed metric scores out of 100 for mobile and desktop">`;
+// Grouped bars, mobile next to desktop, on a 0 to 100 scale. With labels the value sits on top of each bar;
+// without, the values are in the tooltip and in the table beside the chart.
+function chartGeo(n, o = {}) {
+  const W = 520, Hh = 270, L = 34, R = 6, T = o.labels ? 24 : 14, B = 32, pw = W - L - R, ph = Hh - T - B;
+  return { W, Hh, L, R, T, ph, gw: pw / n, bw: o.bw || 14, gap: o.labels ? 6 : 2, y: v => T + ph - (v / 100) * ph };
+}
+function chartSvg(groups, o = {}) {
+  const G = chartGeo(groups.length, o), { W, Hh, L, R, T, ph, gw, bw, gap, y } = G;
+  const bar = (x, p, k) => { if (!p || p.score == null) return ''; const h = Math.max(3, (p.score / 100) * ph), r = Math.min(4, h), yy = y(0) - h; return `<path class="bar ${k}" d="M${x},${y(0)}V${yy + r}Q${x},${yy} ${x + r},${yy}H${x + bw - r}Q${x + bw},${yy} ${x + bw},${yy + r}V${y(0)}Z"/>${o.labels ? `<text class="val" x="${x + bw / 2}" y="${yy - 6}" text-anchor="middle">${esc(p.display)}</text>` : ''}`; };
+  let s = `<svg viewBox="0 0 ${W} ${Hh}" role="img" aria-label="Scores out of 100 for mobile and desktop">`;
   for (const t of [0, 50, 100]) s += `<line class="grid" x1="${L}" x2="${W - R}" y1="${y(t)}" y2="${y(t)}"/><text class="tick" x="${L - 10}" y="${y(t) + 4}" text-anchor="end">${t}</text>`;
-  base.forEach((mt, i) => {
+  groups.forEach((g, i) => {
     const cx = L + gw * i + gw / 2;
-    s += `<rect class="hit" data-i="${i}" x="${cx - gw / 2 + 6}" y="${T - 6}" width="${gw - 12}" height="${ph + 6}" rx="14"/>`
-      + bar(cx - bw - 1, m ? m.metrics[i].score : null, 'm') + bar(cx + 1, d ? d.metrics[i].score : null, 'd')
-      + `<text class="tick" x="${cx}" y="${Hh - 8}" text-anchor="middle">${mt.short}</text>`;
+    s += `<rect class="hit" data-i="${i}" x="${cx - gw / 2 + 6}" y="${T - 6}" width="${gw - 12}" height="${ph + 6}" rx="14"/>` + bar(cx - bw - gap / 2, g.m, 'm') + bar(cx + gap / 2, g.d, 'd')
+      + `<text class="tick" x="${cx}" y="${Hh - 8}" text-anchor="middle">${esc(g.short)}</text>`;
   });
-  el.innerHTML = s + '</svg><div class="tip" id="tip"></div>';
-  const tip = $('#tip', el);
+  return s + '</svg>';
+}
+function drawChart(el, groups, o = {}) {
+  const { W, Hh, L, gw, y } = chartGeo(groups.length, o);
+  el.innerHTML = chartSvg(groups, o) + '<div class="tip"></div>';
+  const tip = $('.tip', el);
   const show = i => {
-    const mm = m && m.metrics[i], dd = d && d.metrics[i], top = Math.max(mm && mm.score || 0, dd && dd.score || 0);
-    tip.innerHTML = `<b>${base[i].name} (${base[i].short})</b>${mm ? `<span><i class="dot m"></i>Mobile<em>${esc(mm.display || '\u2013')}</em></span>` : ''}${dd ? `<span><i class="dot d"></i>Desktop<em>${esc(dd.display || '\u2013')}</em></span>` : ''}`;
+    const g = groups[i], top = Math.max((g.m && g.m.score) || 0, (g.d && g.d.score) || 0);
+    tip.innerHTML = `<b>${esc(g.name)}</b>${g.m ? `<span><i class="dot m"></i>Mobile<em>${esc(g.m.display || '–')}</em></span>` : ''}${g.d ? `<span><i class="dot d"></i>Desktop<em>${esc(g.d.display || '–')}</em></span>` : ''}`;
     tip.style.left = ((L + gw * i + gw / 2) / W * 100) + '%';
-    tip.style.top = `calc(${(y(top) / Hh * 100)}% - 10px)`;
+    tip.style.top = `calc(${(y(top) / Hh * 100)}% - ${o.labels ? 26 : 10}px)`;
     tip.classList.add('on');
     el.querySelectorAll('.hit').forEach(x => x.classList.toggle('on', +x.dataset.i === i));
   };
@@ -419,7 +447,7 @@ function drawChart(el, m, d) {
 
 // ---------- PDF report (print layout). mode: 'client' to share, 'internal' adds skills fit, versions and packages.
 function buildReport(mode) {
-  const r = S.result, m = good(r.psi.mobile), d = good(r.psi.desktop), v = r.stack.verdict, h = r.health, int = mode === 'internal';
+  const r = S.result, m = good(r.psi.mobile), d = good(r.psi.desktop), v = r.stack.verdict, h = r.health, int = mode === 'internal', dz = designOf(r);
   const cell = (s, t = tone) => (s == null ? '\u2013' : dotted(t(s), s));
   const main = g => r.stack.items.filter(i => i.group === g && !/^Not detected|^PHP version/.test(i.name)).map(i => i.name);
   const built = [...main('Platform'), ...main('Page builder')].join(' and '), theme = main('Theme')[0], host = main('Hosting').filter(x => x !== 'PHP').join(', ');
@@ -438,11 +466,16 @@ function buildReport(mode) {
     </div>
 
     <h2>Page speed</h2>
+    ${m || d ? `<div class="rp-charts"><div><p class="rp-cap">Scores by device</p><div class="chart">${chartSvg(scoreGroups(m, d), { labels: true, bw: 22 })}</div></div><div><p class="rp-cap">Speed by metric, score out of 100</p><div class="chart">${chartSvg(speedGroups(m, d))}</div></div></div>
+      <p class="rp-legend"><i class="dot m"></i>Mobile &nbsp; <i class="dot d"></i>Desktop</p>` : ''}
     ${m || d ? `<table><thead><tr><th>Measure</th><th>Mobile</th><th>Desktop</th></tr></thead><tbody>
       ${LH.map(([k, n]) => `<tr><td><b>${n} score</b></td><td>${cell(m ? m.scores[k] : null)}</td><td>${cell(d ? d.scores[k] : null)}</td></tr>`).join('')}
       ${(m || d).metrics.map((x, i) => `<tr><td>${x.name} <span class="d">(${x.short})</span></td><td>${m ? dotted(tone(m.metrics[i].score), esc(m.metrics[i].display)) : '\u2013'}</td><td>${d ? dotted(tone(d.metrics[i].score), esc(d.metrics[i].display)) : '\u2013'}</td></tr>`).join('')}
     </tbody></table>` : '<p>The speed test could not be completed for this site.</p>'}
     ${m && m.field && m.field.lcp ? `<p class="rp-sum">Real visitors on Chrome over the last 28 days: main content appears in ${(m.field.lcp.value / 1000).toFixed(1)} s${m.field.overall ? `, rated ${{ FAST: 'fast', AVERAGE: 'average', SLOW: 'slow' }[m.field.overall] || 'unrated'} overall` : ''}.</p>` : ''}
+
+    <h2>Design</h2>
+    <div class="rp-box"><h3>${dotted(dz.tone, esc(dz.label))}</h3><p>${esc(dz.note)}</p></div>
 
     <h2>What is working well</h2>
     ${r.strengths.length ? `<ul class="rp-good">${r.strengths.map(x => `<li>${esc(x)}</li>`).join('')}</ul>` : '<p>Nothing stood out as a strength on the things we can measure.</p>'}
@@ -505,7 +538,6 @@ document.addEventListener('click', e => {
 });
 document.addEventListener('submit', e => { if (e.target.id === 'f') { e.preventDefault(); runScan($('#u').value); } });
 document.addEventListener('change', e => {
-  if (e.target.id === 'strat') { S.strategy = e.target.value; renderResult(); }
   if (e.target.id === 'cat') { S.cat = e.target.value; S.more = false; drawRows(); }
   if (e.target.id === 'max') S.max = +e.target.value;
   if (e.target.id === 'who') { S.who = e.target.value; render(); }

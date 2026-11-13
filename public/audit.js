@@ -5,9 +5,10 @@ import { SPEED_FIX } from './analyze.js';
 const YEAR = new Date().getFullYear();
 const COST = { Critical: 30, High: 18, Medium: 10, Low: 4 };
 const ORDER = { Critical: 0, High: 1, Medium: 2, Low: 3 };
-const WEIGHT = { Performance: 25, SEO: 20, Security: 20, Accessibility: 15, Content: 10, Images: 10 };
-export const CATS = ['Performance', 'SEO', 'Content', 'Images', 'Accessibility', 'Security'];
-export const CAT_NAME = { Performance: 'Performance', SEO: 'SEO', Content: 'Content', Images: 'Images', Accessibility: 'Mobile and accessibility', Security: 'Security and upkeep' };
+const WEIGHT = { Performance: 22, SEO: 18, Security: 18, Design: 12, Accessibility: 12, Content: 10, Images: 8 };
+export const CATS = ['Performance', 'SEO', 'Design', 'Content', 'Images', 'Accessibility', 'Security'];
+export const CAT_NAME = { Performance: 'Performance', SEO: 'SEO', Design: 'Design', Content: 'Content', Images: 'Images', Accessibility: 'Mobile and accessibility', Security: 'Security and upkeep' };
+const CTA = /\b(contact|get (a |in |your )?(quote|touch|started)|book|enquir|inquir|call (us|now)|whatsapp|buy|shop now|order|sign ?up|register|request|schedule|appointment|free (trial|consult)|hubungi|tempah|daftar|beli)/i;
 const SKIP_LINK = /\.(pdf|jpe?g|png|gif|webp|avif|svg|zip|rar|docx?|xlsx?|pptx?|mp[34]|mov|ics|xml|json|css|js)$|\/(wp-admin|wp-login\.php|wp-json|cart|checkout|my-account|feed|tag|author)(\/|$)|\/page\/\d+/i;
 const plural = (n, w, ws) => `${n} ${n === 1 ? w : ws || w + 's'}`;
 const ok = p => (p && !p.error ? p : null);
@@ -19,6 +20,20 @@ export function readPage(url, status, html, cfg) {
   const q = s => [...doc.querySelectorAll(s)];
   const scripts = q('script[src]').length, ld = !!doc.querySelector('script[type="application/ld+json" i]');
   const mixed = base.protocol === 'https:' ? q('img[src^="http://"],script[src^="http://"],link[rel~="stylesheet"][href^="http://"],iframe[src^="http://"]').length : 0;
+  const fams = new Set();
+  for (const l of q('link[href*="fonts.googleapis.com"]')) for (const f of (l.getAttribute('href').match(/family=[^&]+/g) || [])) for (const one of decodeURIComponent(f.slice(7)).split('|')) fams.add(one.split(':')[0].replace(/\+/g, ' ').trim());
+  const nav = doc.querySelector('header nav ul, nav ul, [role="navigation"] ul');
+  const design = {
+    sliders: q('.rev_slider,.rev_slider_wrapper,rs-module,.nivoSlider,.flexslider,.bx-wrapper,.bxslider,.owl-carousel,.slick-slider,.carousel.slide').length,
+    gfonts: fams.size, inlineStyles: q('[style]').length, favicon: !!doc.querySelector('link[rel~="icon" i]'),
+    autoplay: q('audio[autoplay],video[autoplay]:not([muted])').length,
+    cta: q('a,button').filter(e => { const t = (e.textContent || '').replace(/\s+/g, ' ').trim(); return t.length <= 40 && CTA.test(t); }).length,
+    tel: q('a[href^="tel:" i]').length, wa: q('a[href*="wa.me" i],a[href*="whatsapp" i]').length,
+    longForm: Math.max(0, ...q('form').map(f => f.querySelectorAll('input:not([type=hidden]):not([type=submit]):not([type=button]),select,textarea').length)),
+    navItems: nav ? [...nav.children].filter(c => c.tagName === 'LI').length : 0,
+    popups: /popup-maker|pum-overlay|popupbuilder|sgpb-popup|optinmonster|om-holder|sumome/i.test(html),
+    proofMarkup: /"@type"\s*:\s*"(Review|AggregateRating)"/.test(html),
+  };
   q('script,style,noscript,template,svg').forEach(n => n.remove());
   const text = (doc.body ? doc.body.textContent : '').replace(/\s+/g, ' ').trim(), low = text.toLowerCase();
   const heads = q('h1,h2,h3,h4,h5,h6').map(h => +h.tagName[1]);
@@ -55,6 +70,9 @@ export function readPage(url, status, html, cfg) {
     legacy: q('font,center,marquee,frameset,[bgcolor],table[cellpadding],table[cellspacing]').length,
     flash: q('[src$=".swf" i],[data$=".swf" i]').length > 0,
     scripts, year: years.length ? Math.max(...years) : 0, links,
+    design: { ...design, gifs: imgs.filter(i => ext(real(i)) === 'gif').length,
+      proof: design.proofMarkup || /testimoni|review|what (our|my) (clients?|customers?|patients?) say|ulasan/i.test(text),
+      bestViewed: /best viewed (in|with)|hit counter|visitor counter|you are visitor/i.test(text) },
   };
 }
 
@@ -126,18 +144,42 @@ export function buildIssues(r, cfg) {
     if (t.ua && !t.ga4 && !t.gtm) add('SEO', 'Medium', 'Analytics stopped working in 2023', 'The site still carries the retired Universal Analytics tag, so visits are no longer being measured.', 'Install Google Analytics 4 with conversion tracking.', 'quick', 'seo');
     else if (!t.ga4 && !t.gtm && !t.ua) add('SEO', 'Low', 'No analytics tag visible', 'We could not see Google Analytics or Tag Manager in the page, so visits and leads may not be measured.', 'Install Google Analytics 4 with conversion tracking.', 'quick', 'seo');
 
+    // Design: signs of a dated or broken look. Read from the homepage and from Google's test of it.
+    const g = home.design || {}, L = (m && m.design) || {}, RV = ['revamp', 'revamp'];
+    if (L.contrast) add('Design', L.contrast >= 5 ? 'Medium' : 'Low', `Low-contrast text in ${plural(L.contrast, 'place')}`, 'Text that is too pale against its background is hard to read, especially on a phone outdoors.', 'Adjust text and background colours so everything is easy to read.', 'quick', 'revamp', HP);
+    if (L.taps) add('Design', 'Medium', `${plural(L.taps, 'button or link', 'buttons or links')} too small or too close to tap`, 'On a phone these are easy to miss or to tap by mistake.', 'Make buttons and links at least 48 px tall with space between them.', 'quick', 'revamp', HP);
+    if (L.stretched) add('Design', 'Medium', `${plural(L.stretched, 'image')} stretched out of shape`, 'Images shown at the wrong proportions make a site look careless.', 'Crop images to the proportions of the space they sit in.', 'quick', 'revamp', HP);
+    if (L.blurry) add('Design', 'Low', `${plural(L.blurry, 'image')} blurry on sharp screens`, 'The image files are smaller than the space they fill, so they blur on modern phones.', 'Supply images at twice their displayed size.', 'quick', 'revamp', HP);
+    const cls = m && m.metrics.find(x => x.id === 'cumulative-layout-shift');
+    if (cls && cls.value > 0.25) add('Design', 'Medium', 'Content jumps around while loading', `Layout shift is ${cls.display}; Google\u2019s limit for a good experience is 0.1. Visitors lose their place or tap the wrong thing.`, 'Reserve space for images, banners and fonts so nothing moves.', 'quick', 'speed', HP);
+    if (g.sliders) add('Design', 'Low', 'Rotating banner slider on the homepage', 'Sliders are an older pattern. Most visitors only see the first slide, and they slow the page down.', 'Replace the slider with one strong image and message.', ...RV, HP, { dated: true });
+    if (g.gfonts > 3) add('Design', 'Low', `${g.gfonts} different font families`, 'More than two or three fonts makes a site look inconsistent, and each one slows it down.', 'Settle on one heading font and one body font.', ...RV, HP);
+    if (g.gifs >= 3) add('Design', 'Low', `${g.gifs} animated GIF images`, 'Looping GIFs distract from the message and are heavy to load.', 'Replace GIFs with still images or short muted video.', ...RV, HP, { dated: true });
+    if (g.bestViewed) add('Design', 'Medium', 'Leftovers from an older era of the web', 'Notes such as \u201cbest viewed in\u201d or a visitor counter date the site instantly.', 'Rebuild the page with a current design.', ...RV, HP, { dated: true });
+    if (g.autoplay) add('Design', 'Medium', 'Sound or video plays by itself', 'Unexpected sound is one of the fastest ways to make visitors leave.', 'Let visitors choose to play media.', 'quick', 'maintenance', HP);
+    if (g.popups) add('Design', 'Low', 'Uses a pop-up plugin', 'Pop-ups that appear on arrival interrupt visitors before they have read anything, and Google may rank pages with intrusive mobile pop-ups lower.', 'Show offers inside the page, or delay pop-ups until the visitor has engaged.', 'quick', 'maintenance', HP);
+    if (!g.cta) add('Design', 'Medium', 'No clear call to action on the homepage', 'We found no button or link inviting visitors to contact, book, buy or enquire.', 'Add one clear call-to-action button near the top of every key page.', ...RV, HP);
+    if (!g.tel && !g.wa) add('Design', 'Low', 'No tap-to-call or WhatsApp link', 'Mobile visitors cannot reach the business in one tap.', 'Add click-to-call and WhatsApp buttons.', 'quick', 'maintenance', HP);
+    if (g.longForm > 8) add('Design', 'Low', `Long form (${g.longForm} fields)`, 'Every extra field loses some of the people who started filling it in.', 'Cut forms down to the few fields needed to reply.', 'quick', 'maintenance', HP);
+    if (!g.proof) add('Design', 'Low', 'No testimonials or reviews on the homepage', 'Proof from real customers is one of the strongest reasons visitors trust a business.', 'Add real client reviews or testimonials.', ...RV, HP);
+    if (g.navItems > 9) add('Design', 'Low', `Crowded main menu (${g.navItems} items)`, 'Too many choices make it harder for visitors to find the one they need.', 'Group the menu into five to seven clear items.', ...RV, HP);
+    if (g.inlineStyles > 150) add('Design', 'Low', 'Heavily hand-patched styling', `${g.inlineStyles} elements carry one-off styles, a sign of years of quick fixes on top of the original design.`, 'Rebuild the page with a current design.', ...RV, HP, { dated: true });
+    const builders = s.items.filter(i => i.group === 'Page builder' && !/Elementor Pro|block editor|Not detected/.test(i.name)).map(i => i.name);
+    if (builders.length >= 2) add('Design', 'Low', `Two page builders in use (${builders.slice(0, 2).join(' and ')})`, 'Mixing builders gives pages slightly different looks and loads two sets of code.', 'Rebuild the key pages in Elementor so they are easier to edit and maintain.', ...RV);
+    if (!g.favicon && r.site.favicon === false) add('Design', 'Low', 'No favicon', 'The browser tab and bookmarks show a blank icon where the logo should be.', 'Add a favicon made from the logo.', 'quick', 'maintenance');
+
     // Mobile and accessibility
     pg = on(p => !p.viewport);
     if (pg.length) add('Accessibility', 'Critical', 'Not built for mobile screens', 'No mobile viewport setting, so phones show a shrunken desktop page.', 'Rebuild on a responsive layout that adapts to every screen size.', 'revamp', 'revamp', pg);
     pg = on(p => p.legacy >= 3);
-    if (pg.length) add('Accessibility', 'High', 'Built with outdated layout code', 'Uses table, font or center tags. Websites stopped being built this way over a decade ago, and it does not adapt to phones.', 'Rebuild on a responsive layout that adapts to every screen size.', 'revamp', 'revamp', pg);
+    if (pg.length) add('Design', 'High', 'Built with outdated layout code', 'Uses table, font or center tags. Websites stopped being built this way over a decade ago, and it does not adapt to phones.', 'Rebuild on a responsive layout that adapts to every screen size.', 'revamp', 'revamp', pg, { dated: true });
     if (sum('unlabelled')) add('Accessibility', sum('unlabelled') >= 5 ? 'Medium' : 'Low', `${plural(sum('unlabelled'), 'form field')} without a label`, 'Screen readers cannot tell the visitor what to type, and it weakens autofill.', 'Add a proper label to every form field.', 'quick', 'maintenance', on(p => p.unlabelled));
 
     // Security and upkeep
     if (!/^https:/i.test(home.url)) add('Security', 'Critical', 'No secure connection (HTTPS)', 'Browsers label the site “Not secure”, which puts visitors off filling in forms.', 'Install an SSL certificate and force HTTPS on every page.', 'quick', 'maintenance');
     pg = on(p => p.mixed);
     if (pg.length) add('Security', 'Medium', 'Insecure files on secure pages', `${plural(sum('mixed'), 'file')} still load over plain http, which browsers may block or flag.`, 'Load every image, script and stylesheet over HTTPS.', 'quick', 'maintenance', pg);
-    if (P.some(p => p.flash)) add('Security', 'High', 'Uses Flash content', 'Flash was shut down in 2020 and no longer plays in any browser.', 'Replace Flash with video or modern animation.', 'revamp', 'revamp', on(p => p.flash));
+    if (P.some(p => p.flash)) add('Design', 'High', 'Uses Flash content', 'Flash was shut down in 2020 and no longer plays in any browser.', 'Replace Flash with video or modern animation.', 'revamp', 'revamp', on(p => p.flash), { dated: true });
     const H = r.site.headers || {}, miss = ['strict-transport-security', 'content-security-policy', 'x-frame-options', 'x-content-type-options', 'referrer-policy'].filter(k => !H[k]);
     if (miss.length >= 3) add('Security', 'Low', `${miss.length} of 5 security headers missing`, 'These server settings protect visitors against common attacks such as clickjacking.', 'Add the standard security headers at the server or CDN.', 'quick', 'maintenance');
   }
@@ -147,7 +189,7 @@ export function buildIssues(r, cfg) {
   if (s.outdatedPlugins && s.outdatedPlugins.length) add('Security', s.outdatedPlugins.length >= 3 ? 'High' : 'Medium', `${plural(s.outdatedPlugins.length, 'plugin')} out of date`, `${s.outdatedPlugins.slice(0, 4).join(', ')}${s.outdatedPlugins.length > 4 ? ' and more' : ''}. Outdated plugins are a leading cause of hacked WordPress sites.`, 'Update WordPress, the theme and plugins on a staging copy, then keep them current every month.', 'maintenance', 'maintenance');
   if (s.php && s.php.old) add('Security', 'High', `Server runs PHP ${s.php.version}`, 'This PHP version no longer gets security fixes, and newer versions run noticeably faster.', 'Move to a current PHP version, or to better hosting.', 'maintenance', 'maintenance');
   if (s.jquery && +s.jquery.split('.')[0] < 3) add('Security', 'Low', `Runs an old jQuery (${s.jquery})`, 'jQuery 1 and 2 are no longer maintained and have known security issues.', 'Update outdated front-end libraries.', 'maintenance', 'maintenance');
-  if (s.bootstrap && +s.bootstrap.split('.')[0] <= 3) add('Security', 'Low', `Built on Bootstrap ${s.bootstrap.split('.')[0]}`, 'This framework version stopped receiving updates in 2019, a sign the site has not been rebuilt for years.', 'Update outdated front-end libraries.', 'revamp', 'revamp');
+  if (s.bootstrap && +s.bootstrap.split('.')[0] <= 3) add('Design', 'Medium', `Built on Bootstrap ${s.bootstrap.split('.')[0]}`, 'This framework version stopped receiving updates in 2019, a sign the site has not been rebuilt for years.', 'Update outdated front-end libraries.', 'revamp', 'revamp', null, { dated: true });
   if (s.domain && s.domain.soon) add('Security', 'High', `Domain expires on ${s.domain.expiresText}`, 'If the domain lapses, the website and email stop working.', 'Renew the domain and switch on auto-renew.', 'quick', 'maintenance');
   return out.sort((a, b) => ORDER[a.sev] - ORDER[b.sev]);
 }
@@ -163,6 +205,7 @@ export function healthOf(r) {
     SEO: avg(html ? pen('SEO') : null, m ? m.scores.seo : null),
     Content: html ? pen('Content') : null,
     Images: html ? pen('Images') : null,
+    Design: html ? pen('Design') : null,
     Accessibility: avg(html ? pen('Accessibility') : null, m ? m.scores.accessibility : null),
     Security: html ? pen('Security') : null,
   };
@@ -191,6 +234,10 @@ export function strengthsOf(r) {
     if (home.ld) s.push('Structured data is present.');
     if (home.og) s.push('Social sharing previews are set up.');
     if (n > 1 && !r.broken.length) s.push(`No broken links found across ${n} pages.`);
+    const hd = home.design || {};
+    if (hd.cta) s.push('Clear call to action on the homepage.');
+    if (hd.tel || hd.wa) s.push('One-tap contact by phone or WhatsApp.');
+    if (hd.proof) s.push('Testimonials or reviews are shown.');
   }
   if (st.verdict.tone === 'good') s.push('Built on WordPress and Elementor, the stack we recommend.');
   if (st.wp && st.wp.status === 'good') s.push(`WordPress is up to date (${st.wp.version}).`);
@@ -198,6 +245,18 @@ export function strengthsOf(r) {
   if (st.php && !st.php.old) s.push(`Server runs a supported PHP version (${st.php.version}).`);
   if (st.tags && (st.tags.ga4 || st.tags.gtm)) s.push('Analytics tracking is installed.');
   return s;
+}
+
+// Design verdict from the Design findings. Rules catch dated or broken design; they cannot judge taste.
+export function designOf(r) {
+  const NOTE = 'These checks catch dated or broken design. They cannot judge taste, so have a designer look before you pitch.';
+  if (!r.pages || !r.pages.length) return { tone: 'info', label: 'Not checked', note: 'The site could not be read, so its design was not checked.' };
+  const d = r.issues.filter(i => i.cat === 'Design'), noMobile = r.issues.some(i => i.title === 'Not built for mobile screens');
+  const cost = d.reduce((t, i) => t + COST[i.sev], 0) + (noMobile ? 30 : 0), dated = d.filter(i => i.dated);
+  // "Dated" needs real signs of age (old layout code, sliders, leftovers), not just polish issues like contrast.
+  if (noMobile || dated.some(i => i.sev === 'High') || dated.length >= 2 || cost >= 70) return { tone: 'bad', label: 'Looks dated, a redesign is recommended', note: NOTE };
+  if (cost >= 15) return { tone: 'warn', label: 'Design needs attention', note: NOTE };
+  return { tone: 'good', label: 'No design red flags', note: NOTE };
 }
 
 // Match the detected stack against the Skills Matrix in config.json (expert / support / none).
@@ -217,6 +276,7 @@ export function nextSteps(r, cfg) {
   const tone = r.stack.verdict.tone, kind = r.stack.platform ? r.stack.platform.kind : '';
   if (kind && kind !== 'wordpress' && (tone === 'bad' || tone === 'warn')) g.revamp.push({ text: 'Rebuild the site on WordPress with Elementor, so the client owns it and their team can edit pages without a developer.', pkg: P.revamp });
   else if (kind === 'wordpress' && r.stack.builder && r.stack.builder.id !== 'elementor') g.revamp.push({ text: 'Rebuild the key pages in Elementor so they are easier to edit and maintain.', pkg: P.revamp });
+  if (r.design && r.design.tone === 'bad') g.revamp.push({ text: 'Redesign the site with a current, mobile-first look and one clear call to action.', pkg: P.revamp });
   for (const i of r.issues) { if (seen.has(i.fix)) continue; seen.add(i.fix); g[i.group].push({ text: i.fix, pkg: P[i.pkg] }); }
   if (kind === 'wordpress' && !g.maintenance.length) g.maintenance.push({ text: 'Keep WordPress, the theme and plugins updated every month, with backups and uptime monitoring.', pkg: P.maintenance });
   for (const k in g) g[k] = g[k].slice(0, 7);
@@ -228,7 +288,7 @@ export function verdictOf(r) {
   const top = r.issues.filter(i => (i.sev === 'Critical' || i.sev === 'High') && !i.win).slice(0, 3).map(i => i.title);
   const list = (top.length ? ` Biggest issues: ${top.join('; ')}.` : '') + (ok(r.psi.mobile) || ok(r.psi.desktop) ? '' : ' Speed was not measured in this scan.');
   if (h == null) return { tone: 'info', label: 'Not enough data', summary: 'The site could not be read and the speed test did not run. Try the scan again later.' };
-  if (h < 60 || (tone === 'bad' && h < 75) || r.issues.filter(i => i.sev === 'Critical').length >= 2) return { tone: 'bad', label: 'Strong case for a revamp', summary: `There is a lot to fix here, and a revamp will be easier to justify than patching.${list}` };
+  if (h < 60 || (tone === 'bad' && h < 75) || r.issues.filter(i => i.sev === 'Critical').length >= 2 || (r.design && r.design.tone === 'bad' && h < 75)) return { tone: 'bad', label: 'Strong case for a revamp', summary: `There is a lot to fix here, and a revamp will be easier to justify than patching.${list}` };
   if (h < 80 || tone === 'bad') return { tone: 'warn', label: 'Clear room to improve', summary: `The site works, but it is leaving results on the table.${list}` };
   return { tone: 'good', label: 'In good shape', summary: `This site is in good shape on the things we can measure, so lead with design, content or marketing.${list}` };
 }

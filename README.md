@@ -6,7 +6,8 @@ Internal MYSense tool. Paste one website link and get a single report: what the 
 
 1. Open SenseCheck and paste the client's link. Pick how many pages to check (default 20).
 2. Wait about a minute. Pages are read slowly on purpose so the client's server is not loaded.
-3. Read the result top to bottom: Health Score, page speed, tech stack, strengths, findings, next steps.
+3. Read the result top to bottom: Health Score, page speed (mobile and desktop side by side), design, tech stack, strengths, findings, next steps.
+   The **Design** verdict comes from rules that catch a dated or broken look (old layout code, sliders, low contrast, no call to action and so on). It cannot judge taste, so have a designer look before pitching a redesign.
 4. **Client PDF** is the version to share. **Internal PDF** adds the "Can we take it?" verdict, versions with confidence levels, and our package names. Do not send the internal one to clients.
 5. **History** lists your own past scans. Once personal logins are live they are saved under your email, so you see the same list on any computer, and nobody else sees yours. Use **Remove** to delete one. Scanning the same site again shows the previous Health Score for a before-and-after.
 6. Admins get a **Show: Everyone's scans** switch on the History page, with a "Scanned by" column.
