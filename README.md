@@ -14,6 +14,10 @@ Internal MYSense tool. Paste one website link and get a single report: what the 
 
 "Not detected" and "Not measured" mean the site hides that detail. The tool does not guess.
 
+**When a site cannot be read.** The result opens with a notice naming the exact cause, for example Cloudflare bot protection, a Wordfence or Sucuri block, an expired SSL certificate, a suspended hosting account or a domain that does not resolve, with what to do next. Speed scores still appear, because Google runs that test itself.
+
+**How the tech stack is found.** The homepage code is read first, then every other page in the scan, then the list of files Google's test saw load, then DNS records, robots.txt and the usual login addresses. The Tech stack card lists what was checked under "How we checked". If the platform still cannot be identified, the card says why.
+
 ## Admin guide (rules, Skills Matrix, packages)
 
 Everything editable lives in `public/config.json`. Edit it on GitHub and the change deploys itself. No code changes needed.

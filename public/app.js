@@ -1,4 +1,4 @@
-import { detectStack, summarisePsi } from './analyze.js';
+import { detectStack, summarisePsi, diagnose, dnsClues } from './analyze.js';
 import { readPage, buildIssues, healthOf, strengthsOf, skillsFit, nextSteps, verdictOf, designOf as designVerdict, norm, CATS, CAT_NAME } from './audit.js';
 
 const CFG = await fetch('config.json').then(r => r.json());
@@ -64,7 +64,7 @@ const H = {
 const locked = r => { if (r.headers.get('x-sc-locked')) { location.reload(); throw new Error('SenseCheck is locked. Enter the passcode again.'); } return r; };
 async function via(url) {
   const r = locked(await fetch('/api/fetch?url=' + encodeURIComponent(url)));
-  if (!r.ok) { const j = await r.json().catch(() => ({})); throw new Error(j.error === 'unreachable' ? 'Could not connect to the site' : j.error || 'Request failed'); }
+  if (!r.ok) { const j = await r.json().catch(() => ({})); throw Object.assign(new Error(j.error === 'unreachable' ? 'Could not connect to the site' : j.error || 'Request failed'), { detail: j.detail || '' }); }
   const meta = JSON.parse(decodeURIComponent(r.headers.get('x-sc-meta') || '%7B%7D'));
   return { headers: {}, cookies: [], ...meta, html: await r.text() };
 }
@@ -170,29 +170,42 @@ async function runScan(raw, max = S.max) {
 
   let page = null, err = '';
   try { page = await via(u.href); } catch (e) {
-    err = e.message;
+    err = e.detail || e.message;
     if (!hadScheme) try { page = await via('http://' + u.host + u.pathname); } catch { /* keep first error */ }
   }
-  const blocked = !page || (page.status >= 400 && (page.html.length < 3000 || /cf-chl|just a moment|attention required|access denied|captcha/i.test(page.html)));
+  // Work out exactly why the site could not be read, if it could not.
+  const read = diagnose(page, err, u.hostname);
+  const blocked = !!read && read.level === 'blocked';
   if (blocked) {
-    step('site', 'fail', page ? `Blocked (HTTP ${page.status})` : err);
+    step('site', 'fail', read.title);
     page = { html: '', headers: page ? page.headers : {}, cookies: [], finalUrl: page ? page.finalUrl : u.href, status: page ? page.status : 0 };
-  } else step('site', 'done');
+  } else step('site', 'done', read ? read.title : null);
 
   step('stack', 'run');
   const origin = new URL(page.finalUrl).origin, probes = {}, latest = {}, s0 = detectStack(page);
   const site = { headers: page.headers, robots: null, sitemap: null, disallow: [] };
+  const dnsQ = (name, type) => soft(`https://dns.google/resolve?name=${encodeURIComponent(name)}&type=${type}`).then(x => { try { return (JSON.parse(body(x)).Answer || []).map(a => String(a.data).replace(/\.$/, '').toLowerCase()); } catch { return []; } });
   const [robots, dom] = await Promise.all([blocked ? null : soft(origin + '/robots.txt'), domainInfo(u.hostname)]);
   probes.domain = dom;
+  // DNS records stay readable even when the site itself blocks us.
+  const [nsRec, cnRec] = dom ? await Promise.all([dnsQ(dom.name, 'NS'), dnsQ('www.' + dom.name, 'CNAME')]) : [[], []];
+  probes.dns = dnsClues(nsRec, cnRec);
   if (!blocked) {
     const rb = body(robots);
     site.robots = /user-agent|disallow|sitemap/i.test(rb) && !/<html/i.test(rb);
     site.sitemap = site.robots && /^\s*sitemap:/im.test(rb);
     if (!site.sitemap) for (const f of ['/sitemap.xml', '/sitemap_index.xml', '/wp-sitemap.xml']) if (/<(urlset|sitemapindex)/i.test(body(await soft(origin + f), 3000))) { site.sitemap = true; break; }
-    if (site.robots) site.disallow = disallowed(rb);
+    if (site.robots) { site.disallow = disallowed(rb); probes.robots = rb.slice(0, 4000); }
+    // No platform markers on the homepage: try the usual login addresses before giving up.
+    if (!s0.platform || s0.platform.kind === 'none') {
+      const [wl, ja, dl] = await pool(['/wp-login.php', '/administrator/', '/user/login'], 3, x => soft(origin + x));
+      const hit = (x, re) => !!x && x.status === 200 && re.test(x.html);
+      probes.paths = { wp: hit(wl, /wp-login|wp-submit|user_login/i), joomla: hit(ja, /joomla|com_login|mod-login/i), drupal: hit(dl, /drupal|user-login-form/i) };
+      if (probes.paths.wp) await wpProbes(origin, { ...s0, pluginSlugs: [], themeSlug: '' }, probes, latest);
+    }
     if (s0.platform && s0.platform.kind === 'wordpress') await wpProbes(origin, s0, probes, latest);
   }
-  const stack = detectStack(page, probes, latest);
+  let stack = detectStack(page, probes, latest);
   step('stack', 'done');
 
   let pages = [], broken = [], bigImages = [];
@@ -207,12 +220,31 @@ async function runScan(raw, max = S.max) {
 
   const [mobile, desktop] = await Promise.all([pm, pd]);
   S.busy = false;
-  if (!page.html && mobile.error && desktop.error) return renderFail(domain, err || mobile.error);
-  if (!stack.platform) {
-    const packs = mobile.packs || desktop.packs || [];
-    if (packs.length) stack.verdict.reasons.unshift(`Google\u2019s test detected: ${packs.join(', ')}.`);
+  if (!page.html && mobile.error && desktop.error) return renderFail(domain, read || { title: 'The site did not respond', why: mobile.error, next: 'Check the spelling of the link, then try again.' });
+  // Second pass over everything we collected: every crawled page plus the files Google's test saw load.
+  const psiUrls = [...new Set([...(mobile.urls || []), ...(desktop.urls || [])])];
+  delete mobile.urls; delete desktop.urls;
+  stack = detectStack({ ...page, extra: [...pages.map(x => x.evidence || ''), ...psiUrls].join('\n') }, probes, latest);
+  const unknown = !stack.platform || stack.platform.kind === 'none';
+  stack.tried = [
+    blocked ? `Homepage code: blocked (${read.title.toLowerCase()})` : 'Homepage code: read',
+    blocked ? 'Other pages: not read' : `Other pages: ${pages.length - 1} more read for platform markers`,
+    psiUrls.length ? `Google\u2019s test: ${psiUrls.length} files it loaded were checked` : 'Google\u2019s test: gave us no file list',
+    nsRec.length ? `DNS records: ${nsRec.slice(0, 2).join(', ')}` : 'DNS records: none returned',
+    blocked ? null : `robots.txt: ${site.robots ? 'read' : 'not found'}`,
+    probes.paths ? 'Login addresses for WordPress, Joomla and Drupal: tried' : null,
+  ].filter(Boolean);
+  if (unknown) {
+    stack.platform = stack.platform || { id: 'none', name: 'Not detected', kind: 'none' };
+    stack.verdict = { tone: blocked ? 'info' : 'warn', title: 'The platform could not be identified', reasons: [
+      blocked ? `Our reader was stopped: ${read.title.toLowerCase()}.` : read && read.level === 'limited' ? `${read.title}, so the page code holds few markers.` : 'The page was read, but its code carries no markers of any platform we know.',
+      psiUrls.length ? `Google\u2019s test loaded the page and ${psiUrls.length} files, and none of them point to a known platform.` : 'Google\u2019s speed test gave us no list of files to check.',
+      `DNS records${blocked ? '' : ', robots.txt'}${probes.paths ? ' and the usual login addresses' : ''} gave no match either.`,
+      blocked ? 'Ask the client which platform they use, or scan again once our checker is allowed through.' : 'Most likely a custom-coded site, or a platform deliberately hidden behind a CDN. Ask the client or their developer.',
+    ] };
+    if (!stack.items.some(i => i.group === 'Platform')) stack.items.unshift({ group: 'Platform', name: 'Not detected', version: '', status: 'warn', note: blocked ? 'Site could not be read' : 'No markers found', conf: 'Low' });
   }
-  const r = { id: Date.now(), url: page.finalUrl || u.href, domain, date: new Date().toISOString(), blocked, stack, psi: { mobile, desktop }, pages, broken, bigImages, site };
+  const r = { id: Date.now(), url: page.finalUrl || u.href, domain, date: new Date().toISOString(), blocked, read, stack, psi: { mobile, desktop }, pages, broken, bigImages, site };
   r.issues = buildIssues(r, CFG); r.health = healthOf(r); r.strengths = strengthsOf(r); r.design = designVerdict(r);
   r.fit = skillsFit(stack, CFG); r.steps = nextSteps(r, CFG); r.verdict = verdictOf(r);
   r.pagesChecked = pages.length;
@@ -293,12 +325,18 @@ function step(id, st, note) {
   el.querySelector('.ic').textContent = st === 'done' ? '\u2713' : st === 'fail' ? '!' : '';
   if (note != null) el.querySelector('small').textContent = note;
 }
-function renderFail(domain, why) {
+function renderFail(domain, d) {
   S.route = 'new'; drawNav();
   view.innerHTML = `<div class="top"><div class="crumb">Scans<i>&rsaquo;</i><b>${esc(domain)}</b></div></div>
-    <div class="card start"><h1>Could not check ${esc(domain)}</h1><p>${esc(why || 'The site did not respond.')} Check the spelling of the link, then try again.</p>
+    <div class="card start"><h1>Could not check ${esc(domain)}</h1>
+    <p><b>${esc(d.title)}.</b> ${esc(d.why)}</p><p style="margin-top:12px"><b>What to do:</b> ${esc(d.next)}</p>
     <div class="urlrow"><button class="btn primary" type="button" data-go="new">Try another link</button></div></div>`;
 }
+
+// Notice shown when the site was blocked or only partly readable, with the specific reason.
+const readNote = (r, internal = true) => (r.read ? `<div class="card notice"><h3>${r.read.level === 'blocked' ? 'We could not read this site' : 'This site was only partly readable'}</h3>
+  <p><b>${esc(r.read.title)}.</b> ${esc(r.read.why)}</p>${internal ? `<p><b>What to do:</b> ${esc(r.read.next)}</p>` : ''}
+  ${r.read.level === 'blocked' ? '<p class="muted">Speed scores still come from Google\u2019s own test. Content, SEO, image and design checks need the page code, so they are not included.</p>' : ''}</div>` : '');
 
 const reasons = list => `<ul>${list.map(x => `<li>${esc(x)}</li>`).join('')}</ul>`;
 const stepsHtml = (r, pkg) => GROUPS.map(([k, t]) => `<div><h4>${t}</h4>${r.steps[k].length ? `<ul>${r.steps[k].map(x => `<li>${esc(x.text)}${pkg ? `<br><span class="chip">${esc(x.pkg)}</span>` : ''}</li>`).join('')}</ul>` : '<p class="muted">Nothing needed.</p>'}</div>`).join('');
@@ -321,6 +359,7 @@ function renderResult() {
       <div class="top-r"><button type="button" class="link" data-rescan>Scan again</button></div>
     </div>
 
+    ${readNote(r)}
     <div class="card hero3" id="sec-overview">
       <div class="col who">
         ${(d && d.shot) || (m && m.shot) ? `<div class="shots">${d && d.shot ? `<img src="${esc(d.shot)}" alt="Desktop screenshot of ${esc(r.domain)}">` : ''}${m && m.shot ? `<img src="${esc(m.shot)}" alt="Mobile screenshot of ${esc(r.domain)}">` : ''}</div>` : `<div class="shot empty">${esc(r.domain[0].toUpperCase())}</div>`}
@@ -372,6 +411,7 @@ function renderResult() {
         <div>
           <span class="label">Can we take it? (internal)</span><h4>${dotted(r.fit.tone, r.fit.verdict)}</h4>${reasons(r.fit.reasons)}
           <span class="label sub">What this means for the client</span><h4>${dotted(v.tone, esc(v.title))}</h4>${reasons(v.reasons)}
+          ${r.stack.tried ? `<span class="label sub">How we checked</span>${reasons(r.stack.tried)}` : ''}
         </div>
         <div class="tech">${groups.map(g => `<div class="g"><span>${g}</span><span>Confidence</span></div>` + r.stack.items.filter(i => i.group === g).map(i => `<div class="t"><i class="dot ${i.status}"></i><span>${esc(i.name)}${i.version ? ` <code>${esc(i.version)}</code>` : ''}</span><small>${esc(i.note)}</small><em>${i.conf}</em></div>`).join('')).join('')}</div>
       </div>
@@ -456,6 +496,7 @@ function buildReport(mode) {
     <h1>${esc(r.domain)}</h1>
     <p class="rp-verdict">${dotted(r.verdict.tone, esc(r.verdict.label))}</p>
     <p class="rp-sum">${esc(r.verdict.summary)}</p>
+    ${r.read ? `<div class="rp-box" style="margin-top:12pt"><h3>${r.read.level === 'blocked' ? 'Part of this report is limited' : 'A note on this report'}</h3><p><b>${esc(r.read.title)}.</b> ${esc(r.read.why)}</p>${int ? `<p><b>What to do:</b> ${esc(r.read.next)}</p>` : ''}</div>` : ''}
     ${int ? `<div class="rp-box" style="margin-top:12pt"><h3>Can we take it? ${dotted(r.fit.tone, r.fit.verdict)}</h3>${reasons(r.fit.reasons)}</div>` : ''}
     <div class="rp-top">
       ${(d && d.shot) || (m && m.shot) ? `<div class="shots">${d && d.shot ? `<img src="${esc(d.shot)}" alt="">` : ''}${m && m.shot ? `<img src="${esc(m.shot)}" alt="">` : ''}</div>` : ''}
@@ -487,6 +528,7 @@ function buildReport(mode) {
     <h2>Technology</h2>
     ${int ? '' : `<p>${built ? `The site runs on ${esc(built)}${theme ? `, using the ${esc(theme)} theme` : ''}.` : 'The platform could not be detected from the public pages.'}${host ? ` Hosting: ${esc(host)}.` : ''}</p>`}
     <div class="rp-box" style="margin-top:8pt"><h3>${esc(v.title)}</h3>${reasons(v.reasons)}</div>
+    ${int && r.stack.tried ? `<p class="rp-cap" style="margin-top:8pt">How we checked</p>${reasons(r.stack.tried)}` : ''}
     ${int && r.stack.items.length ? `<table style="margin-top:10pt"><thead><tr><th>Component</th><th>Type</th><th>Version</th><th>Status</th><th>Confidence</th></tr></thead><tbody>
       ${r.stack.items.map(i => `<tr><td><b>${esc(i.name)}</b></td><td>${i.group}</td><td>${esc(i.version || '\u2013')}</td><td>${i.note ? dotted(i.status, esc(i.note)) : ''}</td><td>${i.conf}</td></tr>`).join('')}</tbody></table>` : ''}
 

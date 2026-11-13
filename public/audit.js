@@ -20,6 +20,8 @@ export function readPage(url, status, html, cfg) {
   const q = s => [...doc.querySelectorAll(s)];
   const scripts = q('script[src]').length, ld = !!doc.querySelector('script[type="application/ld+json" i]');
   const mixed = base.protocol === 'https:' ? q('img[src^="http://"],script[src^="http://"],link[rel~="stylesheet"][href^="http://"],iframe[src^="http://"]').length : 0;
+  // Compact evidence for platform detection: generator tags and every file address this page loads.
+  const evidence = [...q('meta[name="generator" i]').map(m => `<meta name="generator" content="${m.getAttribute('content') || ''}">`), ...q('script[src],link[href],img[src],iframe[src]').map(e => e.getAttribute('src') || e.getAttribute('href'))].join('\n').slice(0, 6000);
   const fams = new Set();
   for (const l of q('link[href*="fonts.googleapis.com"]')) for (const f of (l.getAttribute('href').match(/family=[^&]+/g) || [])) for (const one of decodeURIComponent(f.slice(7)).split('|')) fams.add(one.split(':')[0].replace(/\+/g, ' ').trim());
   const nav = doc.querySelector('header nav ul, nav ul, [role="navigation"] ul');
@@ -69,7 +71,7 @@ export function readPage(url, status, html, cfg) {
     mixed, unlabelled: fields.filter(f => !labelled(f)).length,
     legacy: q('font,center,marquee,frameset,[bgcolor],table[cellpadding],table[cellspacing]').length,
     flash: q('[src$=".swf" i],[data$=".swf" i]').length > 0,
-    scripts, year: years.length ? Math.max(...years) : 0, links,
+    scripts, year: years.length ? Math.max(...years) : 0, links, evidence,
     design: { ...design, gifs: imgs.filter(i => ext(real(i)) === 'gif').length,
       proof: design.proofMarkup || /testimoni|review|what (our|my) (clients?|customers?|patients?) say|ulasan/i.test(text),
       bestViewed: /best viewed (in|with)|hit counter|visitor counter|you are visitor/i.test(text) },
@@ -183,6 +185,7 @@ export function buildIssues(r, cfg) {
     const H = r.site.headers || {}, miss = ['strict-transport-security', 'content-security-policy', 'x-frame-options', 'x-content-type-options', 'referrer-policy'].filter(k => !H[k]);
     if (miss.length >= 3) add('Security', 'Low', `${miss.length} of 5 security headers missing`, 'These server settings protect visitors against common attacks such as clickjacking.', 'Add the standard security headers at the server or CDN.', 'quick', 'maintenance');
   }
+  if (r.read && r.read.finding) add('Security', 'Critical', r.read.title, r.read.why, 'Get the site back online and reachable before anything else.', 'quick', 'maintenance');
   if (s.wp && s.wp.status === 'bad') add('Security', 'High', `WordPress is ${plural(s.wp.behind, 'release')} behind`, `Running ${s.wp.version}; the latest is ${s.wp.latest}. Old versions miss security fixes and are targeted by automated attacks.`, 'Update WordPress, the theme and plugins on a staging copy, then keep them current every month.', 'maintenance', 'maintenance');
   else if (s.wp && s.wp.status === 'warn') add('Security', 'Medium', 'WordPress update pending', `Running ${s.wp.version}; the latest is ${s.wp.latest}.`, 'Update WordPress, the theme and plugins on a staging copy, then keep them current every month.', 'maintenance', 'maintenance');
   if (s.elementor && (s.elementor.status === 'bad' || s.elementor.status === 'warn')) add('Security', s.elementor.status === 'bad' ? 'Medium' : 'Low', 'Elementor is behind', `Running ${s.elementor.version}; the latest is ${s.elementor.latest}.`, 'Update WordPress, the theme and plugins on a staging copy, then keep them current every month.', 'maintenance', 'maintenance');
@@ -207,7 +210,7 @@ export function healthOf(r) {
     Images: html ? pen('Images') : null,
     Design: html ? pen('Design') : null,
     Accessibility: avg(html ? pen('Accessibility') : null, m ? m.scores.accessibility : null),
-    Security: html ? pen('Security') : null,
+    Security: html || (r.read && r.read.finding) ? pen('Security') : null,
   };
   let tw = 0, t = 0;
   for (const c of CATS) if (sub[c] != null) { tw += WEIGHT[c]; t += sub[c] * WEIGHT[c]; }

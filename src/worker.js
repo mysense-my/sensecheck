@@ -23,7 +23,8 @@ const KEEP = ['server', 'x-powered-by', 'x-generator', 'via', 'cf-ray', 'cf-cach
   'x-shopify-stage', 'x-litespeed-cache', 'x-varnish', 'x-pingback', 'x-redirect-by', 'x-drupal-cache',
   'x-drupal-dynamic-cache', 'x-aspnet-version', 'x-aspnetmvc-version', 'x-vercel-id', 'x-nf-request-id',
   'x-github-request-id', 'x-served-by', 'x-turbo-charged-by', 'content-length', 'content-security-policy',
-  'x-frame-options', 'x-content-type-options', 'referrer-policy', 'permissions-policy'];
+  'x-frame-options', 'x-content-type-options', 'referrer-policy', 'permissions-policy', 'cf-mitigated', 'x-sucuri-id',
+  'x-sucuri-block', 'x-iinfo', 'x-cdn', 'x-amz-cf-id', 'x-amzn-waf-action', 'www-authenticate', 'retry-after'];
 
 const json = (body, status = 200, extra = {}) => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json', 'cache-control': 'no-store', ...extra } });
 
@@ -182,7 +183,7 @@ async function proxy(u, headOnly) {
       headers: { 'user-agent': UA, accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8', 'accept-language': 'en-GB,en;q=0.9' },
       redirect: 'follow', signal: AbortSignal.timeout(20000),
     });
-  } catch (e) { return json({ error: 'unreachable', detail: String(e && e.message || e) }, 502); }
+  } catch (e) { return json({ error: 'unreachable', detail: `${(e && e.name) || ''} ${(e && e.message) || e}`.trim() }, 502); }
   const headers = {};
   for (const k of KEEP) { const v = res.headers.get(k); if (v) headers[k] = v.slice(0, 300); }
   const cookies = (res.headers.getSetCookie ? res.headers.getSetCookie() : []).map(c => c.split('=')[0]).slice(0, 20);

@@ -21,7 +21,9 @@ KEEP = ['server', 'x-powered-by', 'x-generator', 'via', 'cf-ray', 'cf-cache-stat
         'x-shopid', 'x-shopify-stage', 'x-litespeed-cache', 'x-varnish', 'x-pingback', 'x-redirect-by',
         'x-drupal-cache', 'x-drupal-dynamic-cache', 'x-aspnet-version', 'x-aspnetmvc-version', 'x-vercel-id',
         'x-nf-request-id', 'x-github-request-id', 'x-served-by', 'x-turbo-charged-by', 'content-length',
-        'content-security-policy', 'x-frame-options', 'x-content-type-options', 'referrer-policy', 'permissions-policy']
+        'content-security-policy', 'x-frame-options', 'x-content-type-options', 'referrer-policy', 'permissions-policy',
+        'cf-mitigated', 'x-sucuri-id', 'x-sucuri-block', 'x-iinfo', 'x-cdn', 'x-amz-cf-id', 'x-amzn-waf-action',
+        'www-authenticate', 'retry-after']
 
 
 def load():

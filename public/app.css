@@ -193,6 +193,10 @@ td .link+.link{margin-left:14px}
 .prev{font-size:13.5px}
 .row b small{font-weight:400;font-size:13.5px}
 .dot.mid{background:#8E90A0}
+.notice{border-left:4px solid var(--warn);padding-left:24px}
+.notice h3{margin-bottom:8px}
+.notice p{color:var(--ink2);margin-top:6px;max-width:820px}
+.notice p b{color:var(--ink);font-weight:600}
 .stack .label{display:block}
 .stack .label.sub{margin-top:26px}
 .goodlist{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px 28px;margin:0;padding:0;list-style:none}
