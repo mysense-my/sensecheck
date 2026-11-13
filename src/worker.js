@@ -122,24 +122,39 @@ function same(a, b) {
 }
 const cookieOf = request => ((request.headers.get('cookie') || '').match(/(?:^|;\s*)sc_auth=([a-f0-9]{64})/) || [])[1] || '';
 
+// The screen people see before they are let in. The left side tells a colleague what the tool is for.
 function lockPage(status, message, form) {
   const html = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="robots" content="noindex,nofollow"><title>SenseCheck</title>
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600&display=swap" rel="stylesheet">
-<style>*{box-sizing:border-box}body{margin:0;min-height:100vh;display:grid;place-items:center;padding:16px;background:#E8EFF7;color:#17181C;font:400 15px/1.5 Outfit,system-ui,sans-serif}
-.card{width:100%;max-width:400px;background:#fff;border-radius:24px;padding:36px 32px;box-shadow:0 30px 80px -40px rgba(40,60,110,.35)}
-.brand{display:flex;align-items:center;gap:10px;font-weight:600;font-size:19px;margin-bottom:26px}
-h1{margin:0 0 6px;font-size:24px;font-weight:600;letter-spacing:-.02em}p{margin:0;color:#5F616A}
+<style>*{box-sizing:border-box}body{margin:0;min-height:100vh;display:grid;place-items:center;padding:16px;background:#E8EFF7;color:#17181C;font:400 15.5px/1.5 Outfit,system-ui,sans-serif}
+.wrap{display:grid;grid-template-columns:minmax(0,1.15fr) minmax(0,1fr);width:100%;max-width:880px;background:#fff;border-radius:28px;overflow:hidden;box-shadow:0 30px 80px -40px rgba(40,60,110,.35)}
+.intro{background:#1B1C21;color:#fff;padding:44px 40px}
+.brand{display:flex;align-items:center;gap:10px;font-weight:600;font-size:19px}
+h1{margin:30px 0 12px;font-size:28px;line-height:1.2;font-weight:600;letter-spacing:-.02em;text-wrap:balance}
+.intro p{margin:0;color:#B9BBC4}
+ul{list-style:none;margin:26px 0 0;padding:0;display:grid;gap:14px}
+li{display:flex;gap:12px;color:#E6E7EC;text-wrap:balance}
+li::before{content:"";flex:none;width:20px;height:20px;margin-top:2px;border-radius:50%;background:#5B4FE9 url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20'%3E%3Cpath d='M5.5 10.3l3 3 6-6.3' fill='none' stroke='%23fff' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") center/20px no-repeat}
+.gate{padding:44px 40px;display:flex;flex-direction:column;justify-content:center}
+h2{margin:0 0 6px;font-size:22px;font-weight:600;letter-spacing:-.01em}.gate p{margin:0;color:#5F616A}
 form{margin-top:22px;display:grid;gap:12px}label{font-size:13.5px;font-weight:500;color:#5F616A}
 input{width:100%;height:50px;border:0;border-radius:14px;background:#F4F4FA;padding:0 16px;font:inherit;outline:0}input:focus{box-shadow:0 0 0 2px #5B4FE9}
 button{height:48px;border:0;border-radius:14px;background:#5B4FE9;color:#fff;font:500 15px Outfit,system-ui,sans-serif;cursor:pointer}button:hover{filter:brightness(1.08)}
-.err{color:#C7321F;font-weight:500;margin-top:14px}</style></head><body><main class="card">
+.err{color:#C7321F!important;font-weight:500;margin-top:14px!important}
+@media (max-width:720px){.wrap{grid-template-columns:minmax(0,1fr)}.intro,.gate{padding:28px 24px}h1{font-size:24px;margin-top:22px}}</style></head><body><main class="wrap">
+<section class="intro">
 <div class="brand"><svg viewBox="0 0 32 32" width="30" height="30" aria-hidden="true"><rect width="32" height="32" rx="10" fill="#5B4FE9"/><path d="M9 16.5l4.5 4.5L23 11.5" fill="none" stroke="#fff" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"/></svg>SenseCheck</div>
-${form ? `<h1>Enter the team passcode</h1><p>This tool is for the MYSense team.</p>${message ? `<p class="err" role="alert">${message}</p>` : ''}
+<h1>Pitching a client but not sure what their website needs?</h1>
+<p>Paste their link. In about a minute you get a clear picture of the site and what to propose.</p>
+<ul><li>Site health: speed, SEO, design and security</li><li>What it is built on, and if we can take it on</li><li>What to recommend, in a PDF for the client</li></ul>
+</section>
+<section class="gate">
+${form ? `<h2>Enter the team passcode</h2><p>This tool is for the MYSense team.</p>${message ? `<p class="err" role="alert">${message}</p>` : ''}
 <form method="post" action="/login"><label for="p">Passcode</label><input id="p" name="passcode" type="password" autocomplete="current-password" required autofocus><button type="submit">Unlock</button></form>`
-    : `<h1>SenseCheck is locked</h1><p>${message}</p>`}
-</main></body></html>`;
+    : `<h2>SenseCheck is locked</h2><p>${message}</p>`}
+</section></main></body></html>`;
   return new Response(html, { status, headers: { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store', 'x-robots-tag': 'noindex', 'x-frame-options': 'DENY', 'referrer-policy': 'no-referrer' } });
 }
 
