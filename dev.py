@@ -14,6 +14,7 @@ STORE = os.path.join(HERE, '.local', 'scans.json')
 USERS = ['colleague.a@local.test', 'colleague.b@local.test', 'admin@local.test']
 ADMINS = ['admin@local.test']
 LOCK = threading.Lock()
+KEEP_HOURS = 24  # saved scans are removed after this long, as on the real Worker
 UA = ('Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) '
       'Chrome/130.0.0.0 Safari/537.36 SenseCheck/1.0')
 KEEP = ['server', 'x-powered-by', 'x-generator', 'via', 'cf-ray', 'cf-cache-status', 'x-cache', 'content-encoding',
@@ -108,6 +109,10 @@ class Handler(SimpleHTTPRequestHandler):
     def scans(self, method, sid, want_all, email, admin):
         with LOCK:
             rows = load()
+            fresh = [r for r in rows if time.time() - r.get('created_at', time.time()) < KEEP_HOURS * 3600]
+            if len(fresh) != len(rows):
+                rows = fresh
+                save(rows)
             if not sid and method == 'GET':
                 mine = [r for r in rows if (want_all and admin) or r['email'] == email]
                 return self.out(200, {'scans': [dict(summary(r['result']), id=r['id'], by=r['email']) for r in reversed(mine)]})
@@ -122,7 +127,7 @@ class Handler(SimpleHTTPRequestHandler):
                         r['psi'][k]['shot'] = ''
                 r.pop('id', None); r.pop('by', None)
                 new = str(uuid.uuid4())
-                rows.append({'id': new, 'email': email, 'result': r})
+                rows.append({'id': new, 'email': email, 'created_at': time.time(), 'result': r})
                 save(rows)
                 return self.out(200, {'id': new})
             row = next((r for r in rows if r['id'] == sid), None)

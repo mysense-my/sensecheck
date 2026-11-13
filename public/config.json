@@ -1,4 +1,5 @@
 {
+  "historyHours": 24,
   "crawl": { "maxPages": 20, "delayMs": 300, "maxImageChecks": 10, "maxPluginChecks": 8 },
   "thresholds": { "imageKB": 300, "thinWords": 60, "domainExpiryDays": 45 },
   "placeholders": [

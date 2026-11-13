@@ -8,6 +8,7 @@
 //   /api/me                   who is signed in, and whether scans are saved on the server
 //   /api/scans                GET my scans (?all=1 for admins), POST a new one
 //   /api/scans/<id>           GET one scan, DELETE it (owner or admin only)
+//   Saved scans are removed automatically after 24 hours (var HISTORY_HOURS changes that).
 //   /api/fetch?url=           streams a public page back as plain text, with metadata in a header
 //   /api/fetch?url=&head=1    returns only the metadata (used to read image file sizes)
 //   /api/psi?url=&strategy=   proxies Google PageSpeed Insights and adds the API key
@@ -70,6 +71,8 @@ const summaryOf = r => ({ domain: r.domain, date: r.date, health: { score: r.hea
 
 async function scans(request, env, url, me) {
   if (!env.DB || !me.email) return json({ error: 'no-store' }, 501);
+  // Saved scans are kept for 24 hours (or HISTORY_HOURS), then removed for everyone.
+  await env.DB.prepare('DELETE FROM scans WHERE created_at < ?').bind(new Date(Date.now() - (+env.HISTORY_HOURS || 24) * 3600000).toISOString()).run();
   const id = url.pathname.length > '/api/scans/'.length ? decodeURIComponent(url.pathname.slice('/api/scans/'.length)) : '', m = request.method;
   if (!id && m === 'GET') {
     const all = url.searchParams.has('all') && me.admin;

@@ -44,7 +44,9 @@ function toast(msg) { const t = $('#toast'); t.textContent = msg; t.classList.ad
 const KEY = 'sensecheck.history.v2';
 const sum = r => ({ id: r.id, by: r.by, domain: r.domain, date: r.date, health: { score: r.health ? r.health.score : null }, verdict: r.verdict, fit: r.fit, stack: { platform: r.stack && r.stack.platform } });
 const strip = r => { const cut = p => (p && !p.error ? { ...p, shot: '' } : p); return { ...r, psi: { mobile: cut(r.psi.mobile), desktop: cut(r.psi.desktop) } }; };
-const local = { all() { try { return JSON.parse(localStorage.getItem(KEY)) || []; } catch { return []; } }, save(l) { try { localStorage.setItem(KEY, JSON.stringify(l.slice(0, 30))); } catch { /* storage unavailable */ } } };
+// Scans are kept for a limited time (historyHours in config.json), then removed automatically.
+const KEEP_HOURS = +CFG.historyHours || 24, KEEP_MS = KEEP_HOURS * 3600000;
+const local = { all() { try { const all = JSON.parse(localStorage.getItem(KEY)) || [], fresh = all.filter(x => Date.now() - Date.parse(x.date) < KEEP_MS); if (fresh.length !== all.length) localStorage.setItem(KEY, JSON.stringify(fresh)); return fresh; } catch { return []; } }, save(l) { try { localStorage.setItem(KEY, JSON.stringify(l.slice(0, 30))); } catch { /* storage unavailable */ } } };
 const call = (path, opt) => fetch(path, opt).then(locked).then(r => (r.ok ? r.json() : Promise.reject(new Error('Could not reach the saved scans.'))));
 const H = {
   server: !!ME.store, rows: [],
@@ -285,7 +287,7 @@ function historyCard(rows, title, everyone) {
       <td>${esc(r.stack.platform ? r.stack.platform.name : 'Not detected')}</td>${everyone ? `<td>${esc(r.by || '')}</td>` : ''}
       <td class="nw muted">${fmt(r.date)}</td>
       <td class="nw"><button type="button" class="link" data-open="${r.id}">Open</button><button type="button" class="link" data-remove="${r.id}">Remove</button></td></tr>`).join('')}
-    </tbody></table></div></div>`;
+    </tbody></table></div><p class="keep">Scans are removed automatically after ${KEEP_HOURS} hours.</p></div>`;
 }
 
 function renderNew() {

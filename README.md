@@ -9,7 +9,7 @@ Internal MYSense tool. Paste one website link and get a single report: what the 
 3. Read the result top to bottom: Health Score, page speed (mobile and desktop side by side), design, tech stack, strengths, findings, next steps.
    The **Design** verdict comes from rules that catch a dated or broken look (old layout code, sliders, low contrast, no call to action and so on). It cannot judge taste, so have a designer look before pitching a redesign.
 4. **Client PDF** is the version to share. **Internal PDF** adds the "Can we take it?" verdict, versions with confidence levels, and our package names. Do not send the internal one to clients.
-5. **History** lists your own past scans. Once personal logins are live they are saved under your email, so you see the same list on any computer, and nobody else sees yours. Use **Remove** to delete one. Scanning the same site again shows the previous Health Score for a before-and-after.
+5. **History** lists your own past scans. Once personal logins are live they are saved under your email, so you see the same list on any computer, and nobody else sees yours. Scans are removed automatically after 24 hours. Use **Remove** to delete one sooner. Scanning the same site again shows the previous Health Score for a before-and-after.
 6. Admins get a **Show: Everyone's scans** switch on the History page, with a "Scanned by" column.
 
 "Not detected" and "Not measured" mean the site hides that detail. The tool does not guess.
@@ -26,6 +26,7 @@ Everything editable lives in `public/config.json`. Edit it on GitHub and the cha
 |---|---|
 | `skills` | The Skills Matrix. Each platform, builder or plugin is `expert`, `support` or `none`. Names must match what the Tech stack card shows. Anything not listed gives "Take with caution". |
 | `packages` | The service package name shown beside each recommendation. |
+| `historyHours` | How long a scan stays in History before it is removed automatically (default 24). Once personal logins are live, also set the Worker var `HISTORY_HOURS` to the same number. |
 | `placeholders` | Phrases treated as placeholder text (not case-sensitive). |
 | `thresholds` | `imageKB` oversized-image limit, `thinWords` for near-empty pages, `domainExpiryDays` warning window. |
 | `crawl` | `maxPages` default page limit, `delayMs` pause between requests, `maxImageChecks`, `maxPluginChecks` (set to 0 to stop reading plugin readme files). |
