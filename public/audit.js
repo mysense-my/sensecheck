@@ -215,10 +215,10 @@ export function whyOf(r) {
     const L = [], w = m.why || {}, b = w.bytes, met = id => m.metrics.find(x => x.id === id) || {}, lcp = met('largest-contentful-paint'), tbt = met('total-blocking-time');
     if (b && b.total) {
       const parts = [['Images are', b.image], ['Code (scripts) is', b.script], ['Styling is', b.css], ['Fonts are', b.font], ['Video is', b.media]].sort((x, y) => y[1] - x[1]), [what, size] = parts[0];
-      if (size > 400 && size / b.total >= 0.4) L.push(`${what} the heaviest part of the page: ${mb(size)} out of ${mb(b.total)}. That’s the main thing slowing it down.`);
+      if (size > 400 && size / b.total >= 0.4) L.push(`${what} the heaviest part of the page: ${mb(size)} out of ${mb(b.total)}. ${b.total >= 2500 ? 'That’s the main thing slowing it down.' : 'That’s the biggest chunk of what has to download.'}`);
       else if (b.total > 2000) L.push(`The page weighs ${mb(b.total)}, spread across images (${mb(b.image)}), code (${mb(b.script)}) and styling (${mb(b.css)}).`);
       if (b.script > 500 && !/^Code/.test(what)) L.push(`There’s ${mb(b.script)} of code in ${b.scripts} script files. A phone has to download and run all of it before the page feels ready.`);
-      if (b.thirdHosts >= 5 && b.thirdKb > 300) L.push(`${b.thirdHosts} outside services, such as chat widgets, trackers and embeds, add another ${mb(b.thirdKb)}.`);
+      if (b.thirdHosts >= 5 && b.thirdKb > 300) L.push(`${mb(b.thirdKb)} of that comes from ${b.thirdHosts} other domains, such as trackers, chat widgets, embeds or a separate file server.`);
       if (b.requests > 100) L.push(`The page asks for ${b.requests} separate files, and each one is another trip to the server.`);
     }
     if (w.ttfb > 800) L.push(`The server takes ${(w.ttfb / 1000).toFixed(1)} seconds just to answer, before anything can start loading. That points to the hosting.`);
