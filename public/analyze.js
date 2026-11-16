@@ -245,12 +245,24 @@ function stackVerdict(s) {
 
 const METRICS = [['first-contentful-paint', 'FCP', 'First content'], ['largest-contentful-paint', 'LCP', 'Main content'], ['total-blocking-time', 'TBT', 'Blocking time'], ['cumulative-layout-shift', 'CLS', 'Layout shift'], ['speed-index', 'SI', 'Speed index']];
 export const SPEED_FIX = [
-  [/image|lcp-discovery/, 'Compress and resize images, serve modern formats and lazy-load below the fold.'],
-  [/render-blocking|css|font/, 'Load only the critical styles first and defer the rest.'],
-  [/javascript|script|third-part|legacy|duplicated|bootup|mainthread|long-task/, 'Remove unused scripts and delay third-party tags until they are needed.'],
-  [/cache|document-latency|server|redirect|network|compression|text-compression/, 'Tune the hosting: page caching, compression and a CDN.'],
-  [/dom|layout|cls|forced|animat|lcp/, 'Rebuild the template with lean, stable layout code.'],
+  [/image|lcp-discovery/, 'We’d shrink and compress the images, and load the lower ones only when they’re needed.'],
+  [/render-blocking|css|font/, 'We’d load the essential styles first and the rest afterwards.'],
+  [/javascript|script|third-part|legacy|duplicated|bootup|mainthread|long-task/, 'We’d remove code that isn’t needed and hold back outside scripts until they’re used.'],
+  [/cache|document-latency|server|redirect|network|compression|modern-http/, 'We’d tune the hosting: caching, compression and a content delivery network.'],
+  [/dom|layout|cls|forced|animat|lcp|inp/, 'We’d rebuild the template with leaner, steadier code.'],
 ];
+// Google's speed findings in everyday words.
+export const FRIENDLY = {
+  'image-delivery-insight': 'Images are bigger than they need to be', 'render-blocking-insight': 'Styles and scripts hold the page up before it shows',
+  'legacy-javascript-insight': 'Old-style code that modern browsers don’t need', 'cache-insight': 'Files aren’t saved for repeat visits',
+  'font-display-insight': 'Text stays invisible while fonts load', 'dom-size-insight': 'There is too much going on under the hood',
+  'third-parties-insight': 'Outside services slow the page down', 'lcp-discovery-insight': 'The main image starts loading late',
+  'network-dependency-tree-insight': 'Files load one after another, not together', 'document-latency-insight': 'The server is slow to answer',
+  'duplicated-javascript-insight': 'The same code is loaded more than once', 'forced-reflow-insight': 'The page keeps recalculating its layout',
+  'cls-culprits-insight': 'Things jump around while loading', 'inp-breakdown-insight': 'The page is slow to react to taps',
+  'viewport-insight': 'Not set up properly for phones', 'modern-http-insight': 'Files are sent in an older, slower way',
+  'lcp-breakdown-insight': 'The main content takes too long to show',
+};
 
 // Reduce a PageSpeed Insights response to what the app shows.
 export function summarisePsi(j) {
@@ -274,8 +286,17 @@ export function summarisePsi(j) {
   }
   const cnt = id => (A[id] && A[id].score != null && A[id].score < 1 ? ((A[id].details && A[id].details.items) || []).length || 1 : 0);
   const urls = (((A['network-requests'] || {}).details || {}).items || []).map(i => i.url).filter(Boolean).slice(0, 400);
+  // Where the weight goes, so a low score can be explained in plain terms.
+  const reqs = ((A['network-requests'] || {}).details || {}).items || [];
+  const host0 = (() => { try { return new URL(lh.finalDisplayedUrl || lh.finalUrl || j.id).hostname.replace(/^www\./, ''); } catch { return ''; } })();
+  const kb = list => Math.round(list.reduce((t, x) => t + (x.transferSize || 0), 0) / 1024), of = t => reqs.filter(x => x.resourceType === t);
+  const third = reqs.filter(x => { try { return !!host0 && !new URL(x.url).hostname.endsWith(host0); } catch { return false; } });
+  const bytes = reqs.length ? { total: kb(reqs), image: kb(of('Image')), script: kb(of('Script')), css: kb(of('Stylesheet')), font: kb(of('Font')), media: kb(of('Media')), requests: reqs.length, scripts: of('Script').length, images: of('Image').length,
+    thirdKb: kb(third), thirdHosts: new Set(third.map(x => { try { return new URL(x.url).hostname.split('.').slice(-2).join('.'); } catch { return ''; } })).size } : null;
+  const num = id => (A[id] && A[id].numericValue != null ? Math.round(A[id].numericValue) : null), saveKb = id => (A[id] && A[id].details && A[id].details.overallSavingsBytes ? Math.round(A[id].details.overallSavingsBytes / 1024) : 0);
+  const why = { bytes, ttfb: num('server-response-time'), unusedJs: saveKb('unused-javascript'), unusedCss: saveKb('unused-css-rules') };
   const design = { contrast: cnt('color-contrast'), taps: cnt('target-size'), stretched: cnt('image-aspect-ratio'), blurry: cnt('image-size-responsive') };
-  return { urls, design, scores, metrics, wins, field, shot: (A['final-screenshot'] && A['final-screenshot'].details && A['final-screenshot'].details.data) || '', packs: (lh.stackPacks || []).map(p => p.title), weight: A['total-byte-weight'] && A['total-byte-weight'].numericValue ? Math.round(A['total-byte-weight'].numericValue / 1024) : null };
+  return { urls, why, design, scores, metrics, wins, field, shot: (A['final-screenshot'] && A['final-screenshot'].details && A['final-screenshot'].details.data) || '', packs: (lh.stackPacks || []).map(p => p.title), weight: A['total-byte-weight'] && A['total-byte-weight'].numericValue ? Math.round(A['total-byte-weight'].numericValue / 1024) : null };
 }
 
 // ---------- Why a site could not be read, in specific terms. Returns null when the page was read normally.

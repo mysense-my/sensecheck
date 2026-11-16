@@ -1,10 +1,25 @@
 {
   "historyHours": 24,
-  "crawl": { "maxPages": 20, "delayMs": 300, "maxImageChecks": 10, "maxPluginChecks": 8 },
-  "thresholds": { "imageKB": 300, "thinWords": 60, "domainExpiryDays": 45 },
+  "crawl": {
+    "maxPages": 500,
+    "delayMs": 300,
+    "maxImageChecks": 10,
+    "maxPluginChecks": 8
+  },
+  "thresholds": {
+    "imageKB": 300,
+    "thinWords": 60,
+    "domainExpiryDays": 45
+  },
   "placeholders": [
-    "lorem ipsum", "dolor sit amet", "Sample Page", "Hello world!", "Just another WordPress site",
-    "Add Your Heading Text Here", "Click edit button to change this text", "Your content goes here",
+    "lorem ipsum",
+    "dolor sit amet",
+    "Sample Page",
+    "Hello world!",
+    "Just another WordPress site",
+    "Add Your Heading Text Here",
+    "Click edit button to change this text",
+    "Your content goes here",
     "Welcome to WordPress. This is your first post"
   ],
   "packages": {

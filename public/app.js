@@ -1,5 +1,5 @@
 import { detectStack, summarisePsi, diagnose, dnsClues } from './analyze.js';
-import { readPage, buildIssues, healthOf, strengthsOf, skillsFit, nextSteps, verdictOf, designOf as designVerdict, norm, CATS, CAT_NAME } from './audit.js';
+import { readPage, buildIssues, healthOf, strengthsOf, skillsFit, nextSteps, verdictOf, whyOf, designOf as designVerdict, norm, CATS, CAT_NAME } from './audit.js';
 
 const CFG = await fetch('config.json').then(r => r.json());
 // Who is signed in. The real Worker fills this from the Cloudflare Access login; the local stand-in pretends.
@@ -7,7 +7,7 @@ const ME = await fetch('/api/me').then(r => (r.ok ? r.json() : {})).catch(() => 
 const $ = (s, r = document) => r.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const view = $('#view'), nav = $('#nav');
-const S = { route: 'new', sec: 'overview', result: null, strategy: 'mobile', q: '', cat: 'all', more: false, busy: false, max: CFG.crawl.maxPages, who: 'mine' };
+const S = { route: 'new', sec: 'overview', result: null, strategy: 'mobile', q: '', cat: 'all', more: false, busy: false, max: +new URLSearchParams(location.search).get('pages') || CFG.crawl.maxPages, who: 'mine' };
 
 const I = {
   plus: '<path d="M12 5v14M5 12h14"/>',
@@ -20,10 +20,14 @@ const I = {
   clock: '<circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/>',
   down: '<path d="M12 4v11M7.5 11l4.5 4.5 4.5-4.5M5 19.5h14"/>',
   search: '<circle cx="11" cy="11" r="6.5"/><path d="M16 16l4 4"/>',
+  check: '<path d="M5 12.5l4.5 4.5L19 7.5"/>',
+  sun: '<circle cx="12" cy="12" r="4"/><path d="M12 3v2M12 19v2M3 12h2M19 12h2M5.6 5.6l1.4 1.4M17 17l1.4 1.4M5.6 18.4L7 17M17 7l1.4-1.4"/>',
+  moon: '<path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z"/>',
   link: '<path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1"/><path d="M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1"/>',
 };
 const icon = n => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${I[n]}</svg>`;
-const LOGO = '<svg viewBox="0 0 32 32" width="22" height="22"><rect width="32" height="32" rx="10" fill="#5B4FE9"/><path d="M9 16.5l4.5 4.5L23 11.5" fill="none" stroke="#fff" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+const hd = (ic, colour) => `<span class="ic ${colour}">${icon(ic)}</span>`; // coloured icon chip for a section title
+const LOGO = '<svg viewBox="0 0 32 32" width="22" height="22"><rect width="32" height="32" rx="10" fill="#812FDF"/><path d="M9 16.5l4.5 4.5L23 11.5" fill="none" stroke="#fff" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
 const fmt = iso => new Date(iso).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
 const good = p => (p && !p.error ? p : null);
 const tone = v => (v == null ? 'info' : v >= 90 ? 'good' : v >= 50 ? 'warn' : 'bad');
@@ -130,15 +134,45 @@ async function wpProbes(origin, s0, probes, latest) {
   (await pool(found, 4, sl => soft(WPORG + sl))).forEach((p, i) => { const v = (body(p).match(/"version":"([\d.]+)"/) || [])[1]; if (v && !/^\s*\{"error"/.test(body(p, 40))) probes.plugins[found[i]].latest = v; });
 }
 
-// Polite crawl: same site only, two pages at a time with a pause, robots.txt respected, hard page limit.
-async function crawl(home, max, skip, tick) {
+// Read the sitemap (and up to 8 child sitemaps) so we know how big the site is before we start.
+async function readSitemap(origin, robotsText) {
+  const listed = [...(robotsText || '').matchAll(/^\s*sitemap:\s*(\S+)/gim)].map(m => m[1]);
+  const locs = t => [...t.matchAll(/<loc>\s*(?:<!\[CDATA\[)?\s*([^<\]\s]+)/gi)].map(m => m[1].replace(/&amp;/g, '&'));
+  let first = '';
+  for (const u of [...listed, origin + '/sitemap.xml', origin + '/sitemap_index.xml', origin + '/wp-sitemap.xml'].slice(0, 5)) {
+    first = body(await soft(u));
+    if (/<(urlset|sitemapindex)/i.test(first.slice(0, 3000))) break;
+    first = '';
+  }
+  if (!first) return { found: false, urls: [] };
+  let urls = locs(first);
+  if (/<sitemapindex/i.test(first.slice(0, 3000))) {
+    const kids = urls.filter(u => !/image|video|news|attachment/i.test(u)).slice(0, 8);
+    urls = (await pool(kids, 2, k => soft(k))).flatMap(x => locs(body(x)));
+  }
+  const host = new URL(origin).hostname.replace(/^www\./, '');
+  const same = urls.filter(u => { try { return new URL(u).hostname.replace(/^www\./, '') === host; } catch { return false; } });
+  return { found: true, urls: [...new Set(same)] };
+}
+
+const mins = ms => { const sec = Math.max(5, Math.round(ms / 5000) * 5); return sec < 60 ? `about ${sec} seconds` : sec < 3600 ? `about ${Math.round(sec / 60)} ${Math.round(sec / 60) === 1 ? 'minute' : 'minutes'}` : `about ${(sec / 3600).toFixed(1)} hours`; };
+
+// Whole-site crawl. Polite on purpose: same site only, two pages at a time with a pause, robots.txt respected.
+// It stops at the safety limit and asks before going further.
+async function crawl(home, cap, skip, sitemap, ui) {
   const first = readPage(home.finalUrl, home.status, home.html, CFG), pages = [first], broken = [], seen = new Set([norm(home.finalUrl)]), queue = [];
   const host = new URL(home.finalUrl).hostname.replace(/^www\./, '');
-  const push = p => { for (const l of p.links) if (!seen.has(l.key) && !skip.some(d => new URL(l.href).pathname.startsWith(d))) { seen.add(l.key); queue.push({ ...l, from: p.path }); } };
+  const allowed = href => !skip.some(d => new URL(href).pathname.startsWith(d));
+  const push = p => { for (const l of p.links) if (!seen.has(l.key) && allowed(l.href)) { seen.add(l.key); queue.push({ ...l, from: p.path }); } p.links = []; };
   push(first);
-  let tries = 0;
-  while (pages.length < max && queue.length && tries < max * 2) {
-    const batch = queue.splice(0, Math.min(2, max - pages.length));
+  for (const u of sitemap) { let x; try { x = new URL(u); } catch { continue; } const href = x.origin + x.pathname, key = norm(href); if (!seen.has(key) && allowed(href) && !/\.(pdf|jpe?g|png|gif|webp|svg|zip|xml)$/i.test(x.pathname)) { seen.add(key); queue.push({ key, href, from: 'sitemap' }); } }
+  const t0 = performance.now();
+  let tries = 0, limit = cap;
+  const report = () => { const done = pages.length, left = Math.min(queue.length, Math.max(0, limit - done)), per = tries ? (performance.now() - t0) / tries : 700; ui.progress({ done, total: done + left, more: queue.length > left, eta: left * per }); };
+  report();
+  while (queue.length) {
+    if (pages.length >= limit) { if (cap < 2 || !(await ui.askMore(pages.length, queue.length))) break; limit += cap; }
+    const batch = queue.splice(0, Math.min(2, limit - pages.length));
     tries += batch.length;
     (await Promise.all(batch.map(b => soft(b.href)))).forEach((g, i) => {
       if (!g) return;
@@ -149,10 +183,10 @@ async function crawl(home, max, skip, tick) {
       seen.add(k);
       const p = readPage(fu, g.status, g.html, CFG); pages.push(p); push(p);
     });
-    tick(pages.length);
+    report();
     await sleep(CFG.crawl.delayMs);
   }
-  return { pages, broken };
+  return { pages, broken, skipped: queue.length };
 }
 
 // ---------- scan
@@ -195,8 +229,8 @@ async function runScan(raw, max = S.max) {
   if (!blocked) {
     const rb = body(robots);
     site.robots = /user-agent|disallow|sitemap/i.test(rb) && !/<html/i.test(rb);
-    site.sitemap = site.robots && /^\s*sitemap:/im.test(rb);
-    if (!site.sitemap) for (const f of ['/sitemap.xml', '/sitemap_index.xml', '/wp-sitemap.xml']) if (/<(urlset|sitemapindex)/i.test(body(await soft(origin + f), 3000))) { site.sitemap = true; break; }
+    const sm = await readSitemap(origin, rb);
+    site.sitemap = sm.found; site.sitemapUrls = sm.urls;
     if (site.robots) { site.disallow = disallowed(rb); probes.robots = rb.slice(0, 4000); }
     // No platform markers on the homepage: try the usual login addresses before giving up.
     if (!s0.platform || s0.platform.kind === 'none') {
@@ -210,14 +244,15 @@ async function runScan(raw, max = S.max) {
   let stack = detectStack(page, probes, latest);
   step('stack', 'done');
 
-  let pages = [], broken = [], bigImages = [];
+  let pages = [], broken = [], bigImages = [], skipped = 0;
   if (!blocked) {
     step('pages', 'run');
-    ({ pages, broken } = await crawl(page, max, site.disallow, n => step('pages', 'run', `${n} of up to ${max}`)));
+    ({ pages, broken, skipped } = await crawl(page, max, site.disallow, max > 1 ? site.sitemapUrls || [] : [], progressUi()));
     const urls = pages[0].imgUrls, sizes = await pool(urls, 3, peek);
     if (!pages[0].design.favicon) site.favicon = ((await peek(origin + '/favicon.ico')) || {}).status === 200;
     bigImages = sizes.map((m, i) => ({ url: urls[i], kb: m && m.headers ? Math.round((+m.headers['content-length'] || 0) / 1024) : 0 })).filter(b => b.kb > CFG.thresholds.imageKB);
-    step('pages', 'done', `${pages.length} ${pages.length === 1 ? 'page' : 'pages'}`);
+    step('pages', 'done', `${pages.length} ${pages.length === 1 ? 'page' : 'pages'}${skipped ? `, ${skipped} more not checked` : ''}`);
+    const pr = $('#prog'); if (pr) pr.hidden = true;
   } else step('pages', 'fail', 'Skipped');
 
   const [mobile, desktop] = await Promise.all([pm, pd]);
@@ -226,7 +261,7 @@ async function runScan(raw, max = S.max) {
   // Second pass over everything we collected: every crawled page plus the files Google's test saw load.
   const psiUrls = [...new Set([...(mobile.urls || []), ...(desktop.urls || [])])];
   delete mobile.urls; delete desktop.urls;
-  stack = detectStack({ ...page, extra: [...pages.map(x => x.evidence || ''), ...psiUrls].join('\n') }, probes, latest);
+  stack = detectStack({ ...page, extra: [...pages.slice(0, 40).map(x => x.evidence || ''), ...psiUrls].join('\n') }, probes, latest);
   const unknown = !stack.platform || stack.platform.kind === 'none';
   stack.tried = [
     blocked ? `Homepage code: blocked (${read.title.toLowerCase()})` : 'Homepage code: read',
@@ -247,9 +282,9 @@ async function runScan(raw, max = S.max) {
     if (!stack.items.some(i => i.group === 'Platform')) stack.items.unshift({ group: 'Platform', name: 'Not detected', version: '', status: 'warn', note: blocked ? 'Site could not be read' : 'No markers found', conf: 'Low' });
   }
   const r = { id: Date.now(), url: page.finalUrl || u.href, domain, date: new Date().toISOString(), blocked, read, stack, psi: { mobile, desktop }, pages, broken, bigImages, site };
-  r.issues = buildIssues(r, CFG); r.health = healthOf(r); r.strengths = strengthsOf(r); r.design = designVerdict(r);
+  r.issues = buildIssues(r, CFG); r.health = healthOf(r); r.strengths = strengthsOf(r); r.design = designVerdict(r); r.why = whyOf(r);
   r.fit = skillsFit(stack, CFG); r.steps = nextSteps(r, CFG); r.verdict = verdictOf(r);
-  r.pagesChecked = pages.length;
+  r.pagesChecked = pages.length; r.pagesSkipped = skipped;
   for (const k of ['pages', 'broken', 'bigImages', 'site']) delete r[k];
   await H.add(r).catch(e => toast(e.message));
   open(r);
@@ -291,18 +326,17 @@ function historyCard(rows, title, everyone) {
 }
 
 function renderNew() {
-  const rows = H.rows.slice(0, 5), opts = [...new Set([1, 10, CFG.crawl.maxPages, 50])].sort((a, b) => a - b);
+  const rows = H.rows.slice(0, 5);
   view.innerHTML = `
     <div class="top"><div class="crumb">SenseCheck<i>&rsaquo;</i><b>New scan</b></div></div>
     <div class="card start">
       <h1>Check a client\u2019s website</h1>
-      <p>Paste the link to see what the site runs on, whether we can take it on, what needs fixing and what to propose.</p>
+      <p>Paste the link and we\u2019ll go through the whole website: what it runs on, whether we can take it on, what needs fixing and what to propose.</p>
       <form class="urlrow" id="f" novalidate>
         <label class="field">${icon('link')}<input id="u" type="text" inputmode="url" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="clientsite.com.my" aria-label="Website address"></label>
-        <label class="pill soft">Check: <select id="max">${opts.map(n => `<option value="${n}"${n === S.max ? ' selected' : ''}>${n === 1 ? 'Homepage only' : `Up to ${n} pages`}</option>`).join('')}</select></label>
         <button class="btn primary" type="submit">Run check</button>
       </form>
-      <div class="covers"><span><i class="dot m"></i>Tech stack and versions</span><span><i class="dot d"></i>Speed, SEO, content and security</span><span><i class="dot good"></i>Strengths and next steps</span></div>
+      <div class="covers"><span><i class="dot m"></i>Tech stack and versions</span><span><i class="dot d"></i>Speed, SEO, content and security</span><span><i class="dot c3"></i>Strengths and next steps</span></div>
     </div>
     ${rows.length ? historyCard(rows, H.server ? 'My recent scans' : 'Recent scans') : ''}`;
   const u = $('#u'); if (u && window.matchMedia('(min-width: 821px)').matches) u.focus();
@@ -318,8 +352,33 @@ function renderHistory() {
 function renderScan(domain) {
   view.innerHTML = `<div class="top"><div class="crumb">Scans<i>&rsaquo;</i><b>${esc(domain)}</b></div></div>
     <div class="card start"><h1>Checking ${esc(domain)}</h1>
-    <p>Pages are read slowly so the scan does not load the client\u2019s server. Expect about a minute.</p>
-    <div class="steps">${[['site', 'Reading the site'], ['stack', 'Identifying the tech stack'], ['pages', 'Checking pages'], ['m', 'Measuring mobile speed'], ['d', 'Measuring desktop speed']].map(([id, t]) => `<div class="step" id="st-${id}"><span class="ic"></span><span>${t}</span><small></small></div>`).join('')}</div></div>`;
+    <p>We go through every page we can find, two at a time so we don\u2019t slow the client\u2019s website down. Keep this tab open until it finishes.</p>
+    <div class="steps">${[['site', 'Reading the site'], ['stack', 'Identifying the tech stack'], ['pages', 'Checking pages'], ['m', 'Measuring mobile speed'], ['d', 'Measuring desktop speed']].map(([id, t]) => `<div class="step" id="st-${id}"><span class="ic"></span><span>${t}</span><small></small></div>`).join('')}</div>
+    <div class="prog" id="prog" hidden><div class="bar"><i id="progbar"></i></div><p id="progtext"></p><div id="progask"></div></div></div>`;
+}
+
+// Live progress for the page check: how many pages, how long is left, and the pause at the safety limit.
+function progressUi() {
+  let told = false;
+  return {
+    progress({ done, total, more, eta }) {
+      const box = $('#prog'); if (!box) return;
+      box.hidden = total <= 1;
+      $('#progbar').style.width = Math.min(100, Math.round(done / Math.max(1, total) * 100)) + '%';
+      const size = total >= 100 ? `This is a big website, around ${total}${more ? '+' : ''} pages, so it needs a little time.` : `This website has around ${total} pages.`;
+      $('#progtext').innerHTML = `<b>${done} of ${total}${more ? '+' : ''} pages checked.</b> ${done < total ? `${told ? '' : size + ' '}${esc(mins(eta).replace(/^a/, 'A'))} left.` : more ? '' : 'Finishing up.'}`;
+      if (done > 2) told = true;
+      step('pages', 'run', `${done} of ${total}${more ? '+' : ''}`);
+    },
+    askMore(done, left) {
+      return new Promise(res => {
+        const ask = $('#progask'); if (!ask) return res(false);
+        ask.innerHTML = `<p>We\u2019ve checked ${done} pages and found about ${left} more. Going on could take ${esc(mins(left * 700))}.</p><button class="btn primary" type="button" id="more-yes">Keep going</button> <button class="btn soft" type="button" id="more-no">Finish with these</button>`;
+        $('#more-yes').onclick = () => { ask.innerHTML = ''; res(true); };
+        $('#more-no').onclick = () => { ask.innerHTML = ''; res(false); };
+      });
+    },
+  };
 }
 function step(id, st, note) {
   const el = $('#st-' + id); if (!el) return;
@@ -381,11 +440,16 @@ function renderResult() {
         <span class="label">Google Lighthouse, out of 100</span>
         ${any ? '<div class="chart" id="chart-scores"></div>' : `<p class="note" style="margin-top:16px">Speed test unavailable. ${esc(perr)}</p>`}
       </div>
-      <p class="summary"><b>In short:</b> ${esc(r.verdict.summary)} <span class="muted">${r.pagesChecked ? `${r.pagesChecked} ${r.pagesChecked === 1 ? 'page' : 'pages'} checked.` : ''}</span></p>
+      <p class="summary"><b>In short:</b> ${esc(r.verdict.summary)} <span class="muted">${r.pagesChecked ? `${r.pagesChecked} ${r.pagesChecked === 1 ? 'page' : 'pages'} checked${r.pagesSkipped ? `, ${r.pagesSkipped} more were not` : ''}.` : ''}</span></p>
     </div>
 
+    ${r.why && r.why.length ? `<div class="card" id="sec-why">
+      <div class="card-head"><h3>${hd('search', 'yellow')}What\u2019s behind the scores</h3><span class="muted">The main reasons each one is where it is</span></div>
+      <div class="why">${r.why.map(w => `<div><h4>${dotted(htone(w.score), CAT_NAME[w.cat])}<b>${w.score}</b></h4>${w.lines.length ? reasons(w.lines) : `<p class="muted">${esc(w.fine)}</p>`}</div>`).join('')}</div>
+    </div>` : ''}
+
     <div class="card" id="sec-speed">
-      <div class="card-head"><h3>Page speed</h3><span class="muted">Google Lighthouse test on mobile and desktop, ${fmt(r.date)}</span></div>
+      <div class="card-head"><h3>${hd('gauge', 'cyan')}Page speed</h3><span class="muted">Google Lighthouse test on mobile and desktop, ${fmt(r.date)}</span></div>
       ${any ? `<div class="speed2">
           <div><div class="chart-head"><span class="label">Speed by metric, score out of 100</span>${LEGEND}</div><div class="chart" id="chart-speed"></div></div>
           <div class="tablewrap"><table class="mini"><thead><tr><th>Measure</th><th>Mobile</th><th>Desktop</th></tr></thead><tbody>
@@ -400,7 +464,7 @@ function renderResult() {
     </div>
 
     <div class="card" id="sec-design">
-      <div class="card-head"><h3>Design</h3><span class="muted">Checks for a dated or broken look</span></div>
+      <div class="card-head"><h3>${hd('layout', 'pink')}Design</h3><span class="muted">Checks for a dated or broken look</span></div>
       <div class="stack">
         <div><span class="label">Verdict</span><h4>${dotted(dz.tone, esc(dz.label))}</h4><p class="ink2" style="margin-top:10px">${esc(dz.note)}</p></div>
         <div>${looks.length ? `<ul class="goodlist one">${looks.map(x => `<li><i class="dot ${SEV[x.sev]}"></i><span>${esc(x.title)}</span></li>`).join('')}</ul>` : `<p class="note">${dz.tone === 'info' ? 'No design findings.' : 'The checks found nothing dated or broken.'}</p>`}</div>
@@ -408,7 +472,7 @@ function renderResult() {
     </div>
 
     <div class="card" id="sec-stack">
-      <div class="card-head"><h3>Tech stack</h3>${r.blocked ? '<span class="muted">The site blocked our reader, so details are limited</span>' : ''}</div>
+      <div class="card-head"><h3>${hd('layers', 'purple')}Tech stack</h3>${r.blocked ? '<span class="muted">The site blocked our reader, so details are limited</span>' : ''}</div>
       <div class="stack">
         <div>
           <span class="label">Can we take it? (internal)</span><h4>${dotted(r.fit.tone, r.fit.verdict)}</h4>${reasons(r.fit.reasons)}
@@ -420,12 +484,12 @@ function renderResult() {
     </div>
 
     <div class="card" id="sec-strengths">
-      <div class="card-head"><h3>What is working well</h3><span class="muted">Keep these in any revamp</span></div>
+      <div class="card-head"><h3>${hd('check', 'yellow')}What is working well</h3><span class="muted">Keep these in any revamp</span></div>
       ${r.strengths.length ? `<ul class="goodlist">${r.strengths.map(x => `<li><i class="dot good"></i><span>${esc(x)}</span></li>`).join('')}</ul>` : '<p class="note">Nothing stood out as a strength on the things we can measure.</p>'}
     </div>
 
     <div class="card" id="sec-findings">
-      <div class="card-head"><h3>Findings</h3><span class="muted" id="count"></span></div>
+      <div class="card-head"><h3>${hd('list', 'pink')}Findings</h3><span class="muted" id="count"></span></div>
       <div class="tools">
         <label class="field">${icon('search')}<input id="q" type="search" placeholder="Search findings" aria-label="Search findings"></label>
         <label class="pill soft">Show: <select id="cat"><option value="all">All categories</option>${CATS.map(c => `<option value="${c}">${CAT_NAME[c]}</option>`).join('')}</select></label>
@@ -435,7 +499,7 @@ function renderResult() {
     </div>
 
     <div class="card" id="sec-steps">
-      <div class="card-head"><h3>Recommended next steps</h3><span class="muted">Each one maps to a service package</span></div>
+      <div class="card-head"><h3>${hd('flag', 'purple')}Recommended next steps</h3><span class="muted">Each one maps to a service package</span></div>
       <div class="steps3">${stepsHtml(r, true)}</div>
     </div>`;
   if (any) { drawChart($('#chart-scores'), scoreGroups(m, d), { labels: true, bw: 22 }); drawChart($('#chart-speed'), speedGroups(m, d)); }
@@ -508,6 +572,8 @@ function buildReport(mode) {
       </tbody></table></div>
     </div>
 
+    ${r.why && r.why.some(w => w.lines.length) ? `<h2>What\u2019s behind the scores</h2><div class="rp-why">${r.why.filter(w => w.lines.length).map(w => `<p><b>${CAT_NAME[w.cat]} (${w.score}).</b> ${w.lines.map(esc).join(' ')}</p>`).join('')}</div>` : ''}
+
     <h2>Page speed</h2>
     ${m || d ? `<div class="rp-charts"><div><p class="rp-cap">Scores by device</p><div class="chart">${chartSvg(scoreGroups(m, d), { labels: true, bw: 22 })}</div></div><div><p class="rp-cap">Speed by metric, score out of 100</p><div class="chart">${chartSvg(speedGroups(m, d))}</div></div></div>
       <p class="rp-legend"><i class="dot m"></i>Mobile &nbsp; <i class="dot d"></i>Desktop</p>` : ''}
@@ -518,7 +584,7 @@ function buildReport(mode) {
     ${m && m.field && m.field.lcp ? `<p class="rp-sum">Real visitors on Chrome over the last 28 days: main content appears in ${(m.field.lcp.value / 1000).toFixed(1)} s${m.field.overall ? `, rated ${{ FAST: 'fast', AVERAGE: 'average', SLOW: 'slow' }[m.field.overall] || 'unrated'} overall` : ''}.</p>` : ''}
 
     <h2>Design</h2>
-    <div class="rp-box"><h3>${dotted(dz.tone, esc(dz.label))}</h3><p>${esc(dz.note)}</p></div>
+    <div class="rp-box"><h3>${dotted(dz.tone, esc(dz.label))}</h3><p>${esc(int ? dz.note : 'This comes from our checks for design that looks dated or broken.')}</p></div>
 
     <h2>What is working well</h2>
     ${r.strengths.length ? `<ul class="rp-good">${r.strengths.map(x => `<li>${esc(x)}</li>`).join('')}</ul>` : '<p>Nothing stood out as a strength on the things we can measure.</p>'}
@@ -536,13 +602,15 @@ function buildReport(mode) {
 
     <h2>Recommended next steps</h2>
     <div class="rp-cols">${stepsHtml(r, int)}</div>
-    <p class="rp-foot">Prepared by MYSense, mysense.com.my. ${r.pagesChecked ? `${r.pagesChecked} public ${r.pagesChecked === 1 ? 'page was' : 'pages were'} checked on ${fmt(r.date)}. ` : ''}Speed scores come from Google PageSpeed Insights (Lighthouse); lab results vary slightly between runs. Technology is read from public page code, so hidden components may not appear.</p>`;
+    <p class="rp-foot"><img class="rp-logo" src="img/mysense-light.png" alt="MYSense">Prepared by MYSense, mysense.com.my. ${r.pagesChecked ? `${r.pagesChecked} public ${r.pagesChecked === 1 ? 'page was' : 'pages were'} checked on ${fmt(r.date)}. ` : ''}Speed scores come from Google PageSpeed Insights (Lighthouse); lab results vary slightly between runs. Technology is read from public page code, so hidden components may not appear.</p>`;
 }
 function printReport(mode) {
   if (!S.result) return;
   buildReport(mode);
   document.title = `SenseCheck ${mode === 'internal' ? 'Internal Audit' : 'Report'} - ${S.result.domain}`;
-  Promise.all([...document.querySelectorAll('#report img')].map(i => (i.decode ? i.decode().catch(() => {}) : 0))).then(() => { window.print(); setTimeout(() => { document.title = 'SenseCheck'; }, 500); });
+  const theme = document.documentElement.dataset.theme || 'light';
+  document.documentElement.dataset.theme = 'light'; // PDFs always print light
+  Promise.all([...document.querySelectorAll('#report img')].map(i => (i.decode ? i.decode().catch(() => {}) : 0))).then(() => { window.print(); setTimeout(() => { document.title = 'SenseCheck'; document.documentElement.dataset.theme = theme; }, 500); });
 }
 
 // ---------- routing and events
@@ -588,6 +656,17 @@ document.addEventListener('change', e => {
   if (e.target.id === 'devuser' && ME.local) fetch('/api/dev-login?as=' + encodeURIComponent(e.target.value), { method: 'POST' }).then(() => location.reload());
 });
 document.addEventListener('input', e => { if (e.target.id === 'q') { S.q = e.target.value; drawRows(); } });
+
+// Light and dark mode, remembered in this browser.
+const themeBtn = $('#theme');
+function setTheme(t) {
+  document.documentElement.dataset.theme = t;
+  try { localStorage.setItem('sensecheck.theme', t); } catch { /* storage unavailable */ }
+  themeBtn.innerHTML = t === 'dark' ? icon('sun') + 'Light mode' : icon('moon') + 'Dark mode';
+  themeBtn.setAttribute('aria-label', t === 'dark' ? 'Switch to light mode' : 'Switch to dark mode');
+}
+setTheme(document.documentElement.dataset.theme === 'dark' ? 'dark' : 'light');
+themeBtn.addEventListener('click', () => setTheme(document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark'));
 
 drawUser();
 render();

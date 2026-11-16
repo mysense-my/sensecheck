@@ -4,9 +4,10 @@ Internal MYSense tool. Paste one website link and get a single report: what the 
 
 ## User guide (account servicing)
 
-1. Open SenseCheck and paste the client's link. Pick how many pages to check (default 20).
-2. Wait about a minute. Pages are read slowly on purpose so the client's server is not loaded.
-3. Read the result top to bottom: Health Score, page speed (mobile and desktop side by side), design, tech stack, strengths, findings, next steps.
+1. Open SenseCheck and paste the client's link. It checks every page it can find.
+2. Wait while it works. A progress bar shows how many pages there are and roughly how long is left. Pages are read slowly on purpose so the client's server is not loaded, and the tab has to stay open. At 500 pages it pauses and asks whether to keep going.
+3. Read the result top to bottom: Health Score, what's behind the scores, page speed (mobile and desktop side by side), design, tech stack, strengths, findings, next steps. The wording is deliberately plain and friendly so it can be read out to a client.
+   The **Dark mode** switch at the top right changes the look for you only. PDFs always print light.
    The **Design** verdict comes from rules that catch a dated or broken look (old layout code, sliders, low contrast, no call to action and so on). It cannot judge taste, so have a designer look before pitching a redesign.
 4. **Client PDF** is the version to share. **Internal PDF** adds the "Can we take it?" verdict, versions with confidence levels, and our package names. Do not send the internal one to clients.
 5. **History** lists your own past scans. Once personal logins are live they are saved under your email, so you see the same list on any computer, and nobody else sees yours. Scans are removed automatically after 24 hours. Use **Remove** to delete one sooner. Scanning the same site again shows the previous Health Score for a before-and-after.
@@ -29,7 +30,7 @@ Everything editable lives in `public/config.json`. Edit it on GitHub and the cha
 | `historyHours` | How long a scan stays in History before it is removed automatically (default 24). Once personal logins are live, also set the Worker var `HISTORY_HOURS` to the same number. |
 | `placeholders` | Phrases treated as placeholder text (not case-sensitive). |
 | `thresholds` | `imageKB` oversized-image limit, `thinWords` for near-empty pages, `domainExpiryDays` warning window. |
-| `crawl` | `maxPages` default page limit, `delayMs` pause between requests, `maxImageChecks`, `maxPluginChecks` (set to 0 to stop reading plugin readme files). |
+| `crawl` | `maxPages` safety limit where a scan pauses and asks before going on (default 500), `delayMs` pause between requests, `maxImageChecks`, `maxPluginChecks` (set to 0 to stop reading plugin readme files). |
 
 Verdict logic: any `none` item gives **Not a fit**; any `support` or unlisted item gives **Take with caution**; all `expert` gives **Can take**.
 

@@ -1,6 +1,6 @@
 // SenseCheck audit: page facts, issues, strengths, health score, skills fit and next steps.
 // Rule lists (placeholder phrases, thresholds, packages, Skills Matrix) live in config.json.
-import { SPEED_FIX } from './analyze.js';
+import { SPEED_FIX, FRIENDLY } from './analyze.js';
 
 const YEAR = new Date().getFullYear();
 const COST = { Critical: 30, High: 18, Medium: 10, Low: 4 };
@@ -79,122 +79,158 @@ export function readPage(url, status, html, cfg) {
 }
 
 // Every issue: category, severity, where it was found, a plain-English fix, a group and a service package.
+// The wording is deliberately friendly and everyday: these lines are read by sales staff and by clients.
 export function buildIssues(r, cfg) {
-  const out = [], P = r.pages, home = P[0], s = r.stack, n = P.length, T = cfg.thresholds;
+  const out = [], P = r.pages, home = P[0], s = r.stack, T = cfg.thresholds;
   const HP = home ? [home.path] : null, name = p => (home && p === home.path ? 'Homepage' : p);
   const where = list => (!list ? 'Whole site' : list.length === 1 ? name(list[0]) : `${name(list[0])} and ${list.length - 1} more`);
   const add = (cat, sev, title, detail, fix, group, pkg, pages, extra) => out.push({ cat, sev, title, detail, fix, group, pkg, where: where(pages), ...extra });
   const on = f => P.filter(f).map(p => p.path);
   const sum = k => P.reduce((t, p) => t + p[k], 0);
   const m = ok(r.psi.mobile), d = ok(r.psi.desktop);
+  const TUNE = 'We’d give the site a full speed tune-up: lighter images, less code, better caching and hosting.';
+  const IMG = 'We’d shrink and compress the images, and load the lower ones only when they’re needed.';
+  const TITLES = 'We’d write a clear title and description for every page.', HEADS = 'We’d give every page one clear main heading and tidy up the heading order.';
+  const FRESH = 'We’d rebuild the page with a fresh, modern design.', FLEX = 'We’d rebuild it so it adapts to every screen size.';
+  const UPD = 'We’d update WordPress, the theme and plugins safely on a test copy, then keep them up to date every month.';
+  const GA = 'We’d set up Google Analytics 4 and track enquiries.';
   let pg;
 
   // Performance
   if (m) {
     const p = m.scores.performance, lcp = m.metrics.find(x => x.id === 'largest-contentful-paint');
-    const lcpLine = lcp && lcp.display ? ` The main content takes ${lcp.display} to appear; Google’s target is 2.5 s.` : '';
-    if (p != null && p < 50) add('Performance', p < 30 ? 'Critical' : 'High', `Slow on mobile: ${p} out of 100`, `Google rates mobile performance as poor.${lcpLine}`, 'Run a full speed optimisation: images, scripts, caching and hosting.', 'quick', 'speed', HP);
-    else if (p != null && p < 90) add('Performance', 'Medium', `Mobile speed needs work: ${p} out of 100`, `Below Google’s “good” mark of 90.${lcpLine}`, 'Optimise the slowest parts of the page for mobile.', 'quick', 'speed', HP);
-    if (m.field && m.field.overall === 'SLOW') add('Performance', 'High', 'Real visitors get a slow experience', 'Chrome data from actual visitors over the last 28 days rates this site as slow. Google uses this data in ranking.', 'Fix the Core Web Vitals (LCP, INP, CLS) until real-visitor data reads “good”.', 'quick', 'speed', HP);
-    for (const w of m.wins) add('Performance', w.saving >= 1000 ? 'High' : w.saving >= 300 ? 'Medium' : 'Low', w.title, w.display || (w.saving ? `Estimated saving of ${(w.saving / 1000).toFixed(1)} s on mobile.` : 'Flagged by Google’s speed test.'), (SPEED_FIX.find(([re]) => re.test(w.id)) || [0, 'Covered in a speed optimisation pass.'])[1], 'quick', 'speed', HP, { win: true });
-    if (m.weight && m.weight > 3000) add('Performance', 'Medium', `Heavy page: ${(m.weight / 1024).toFixed(1)} MB`, 'The homepage downloads far more data than it needs to, which hurts visitors on mobile data.', 'Compress and resize images, serve modern formats and lazy-load below the fold.', 'quick', 'speed', HP);
+    const lcpLine = lcp && lcp.display ? ` The main part of the page takes ${lcp.display} to show up, and people expect about 2.5 seconds.` : '';
+    if (p != null && p < 50) add('Performance', p < 30 ? 'Critical' : 'High', `Really slow on phones (${p} out of 100)`, `Google rates the mobile speed as poor.${lcpLine} Most people give up before a page this slow finishes loading.`, TUNE, 'quick', 'speed', HP);
+    else if (p != null && p < 90) add('Performance', 'Medium', `Could be faster on phones (${p} out of 100)`, `Not bad, but still under Google’s “good” mark of 90.${lcpLine}`, 'We’d speed up the slowest parts of the page for mobile visitors.', 'quick', 'speed', HP);
+    if (m.field && m.field.overall === 'SLOW') add('Performance', 'High', 'Real visitors are getting a slow site', 'This isn’t a lab test. Google’s data from actual visitors over the last 28 days says the site feels slow, and Google uses that when it ranks pages.', 'We’d fix the loading problems until the real-visitor data turns green.', 'quick', 'speed', HP);
+    for (const w of m.wins) {
+      const kbs = (w.display.match(/([\d,]+)\s*KiB/) || [])[1];
+      const gain = w.saving >= 100 ? `Fixing this could save about ${(w.saving / 1000).toFixed(1)} seconds on phones.` : kbs ? `About ${kbs} KB could be trimmed off the page.` : 'Google’s speed test flagged this.';
+      add('Performance', w.saving >= 1000 ? 'High' : w.saving >= 300 ? 'Medium' : 'Low', FRIENDLY[w.id] || w.title, gain, (SPEED_FIX.find(([re]) => re.test(w.id)) || [0, 'We’d sort this out as part of a speed tune-up.'])[1], 'quick', 'speed', HP, { win: true });
+    }
+    if (m.weight && m.weight > 3000) add('Performance', 'Medium', `The homepage is heavy (${(m.weight / 1024).toFixed(1)} MB)`, 'It downloads far more than it needs to, which hurts anyone on mobile data.', IMG, 'quick', 'speed', HP);
   }
-  if (d && d.scores.performance != null && d.scores.performance < 50) add('Performance', 'Medium', `Slow on desktop too: ${d.scores.performance} out of 100`, 'Desktop usually scores much higher than mobile, so a low score here points to a heavy page.', 'Run a full speed optimisation: images, scripts, caching and hosting.', 'quick', 'speed');
+  if (d && d.scores.performance != null && d.scores.performance < 50) add('Performance', 'Medium', `Slow on computers too (${d.scores.performance} out of 100)`, 'Computers usually score much higher than phones, so a low score here means the page itself is heavy.', TUNE, 'quick', 'speed', HP);
 
   if (home) {
-    if (home.scripts > 40) add('Performance', 'Low', `${home.scripts} script files on the homepage`, 'Every script is another download and more work for the phone before the page responds.', 'Remove unused scripts and delay third-party tags until they are needed.', 'quick', 'speed', HP);
+    if (home.scripts > 40) add('Performance', 'Low', `${home.scripts} script files on the homepage`, 'Every script is one more download, and more work for the phone before the page responds.', 'We’d remove code that isn’t needed and hold back outside scripts until they’re used.', 'quick', 'speed', HP);
 
     // Content
     pg = on(p => p.placeholders.length);
-    if (pg.length) add('Content', 'High', 'Placeholder text left on the site', `Found “${[...new Set(P.flatMap(p => p.placeholders))].slice(0, 3).join('”, “')}”. Visitors are seeing unfinished content.`, 'Replace placeholder text with real copy, or remove the page.', 'quick', 'maintenance', pg);
-    if (r.broken.length) add('Content', r.broken.length >= 3 ? 'High' : 'Medium', plural(r.broken.length, 'broken link'), `These lead to an error page: ${r.broken.slice(0, 3).map(b => `${b.path} (${b.status})`).join(', ')}${r.broken.length > 3 ? ' and more' : ''}.`, 'Fix or redirect every broken link.', 'quick', 'maintenance', [...new Set(r.broken.map(b => b.from))]);
+    if (pg.length) add('Content', 'High', 'Leftover dummy text on the site', `We found “${[...new Set(P.flatMap(p => p.placeholders))].slice(0, 3).join('”, “')}”. Visitors are seeing unfinished content, which looks careless.`, 'We’d replace the dummy text with real copy, or take those pages down.', 'quick', 'maintenance', pg);
+    if (r.broken.length) add('Content', r.broken.length >= 3 ? 'High' : 'Medium', plural(r.broken.length, 'broken link'), `Clicking these leads to an error page: ${r.broken.slice(0, 3).map(b => `${b.path} (${b.status})`).join(', ')}${r.broken.length > 3 ? ' and more' : ''}. That’s a dead end for visitors and for Google.`, 'We’d fix or redirect every broken link.', 'quick', 'maintenance', [...new Set(r.broken.map(b => b.from))]);
     pg = on(p => p.words < T.thinWords);
-    if (pg.length) add('Content', 'Medium', `${plural(pg.length, 'page')} with almost no content`, `Under ${T.thinWords} words of text. Thin pages rarely rank and look unfinished.`, 'Write proper content for thin pages, or merge them.', 'revamp', 'revamp', pg);
+    if (pg.length) add('Content', 'Medium', `${plural(pg.length, 'page')} with almost nothing on ${pg.length === 1 ? 'it' : 'them'}`, `Under ${T.thinWords} words of text. Thin pages look unfinished and rarely show up on Google.`, 'We’d write proper content for these pages, or merge them into others.', 'revamp', 'revamp', pg);
     const yr = Math.max(...P.map(p => p.year));
-    if (yr && yr <= YEAR - 2) add('Content', 'Low', `Footer still says © ${yr}`, 'A small detail, but it tells visitors nobody is looking after the site.', 'Use an automatic year in the footer.', 'quick', 'maintenance');
+    if (yr && yr <= YEAR - 2) add('Content', 'Low', `The footer still says © ${yr}`, 'It’s a small thing, but it tells visitors nobody has touched the site in a while.', 'We’d make the year update by itself.', 'quick', 'maintenance');
 
     // Images
     const noAlt = sum('noAlt'), imgs = sum('imgs');
-    if (noAlt) add('Images', noAlt >= 10 ? 'Medium' : 'Low', `${plural(noAlt, 'image')} missing alt text`, `Out of ${imgs} checked. Alt text is what screen readers read out and what Google uses to understand images.`, 'Add descriptive alt text to every meaningful image.', 'quick', 'seo', on(p => p.noAlt));
-    if (r.bigImages.length) { const top = Math.max(...r.bigImages.map(b => b.kb)); add('Images', top >= 1000 ? 'High' : 'Medium', `${plural(r.bigImages.length, 'oversized image')} on the homepage`, `Over ${T.imageKB} KB each; the largest is ${top >= 1000 ? (top / 1024).toFixed(1) + ' MB' : top + ' KB'}. Most web images should be under 200 KB.`, 'Compress and resize images, serve modern formats and lazy-load below the fold.', 'quick', 'speed', HP); }
-    if (sum('oldFmt') >= 5 && !sum('newFmt')) add('Images', 'Medium', 'No modern image formats', `All ${sum('oldFmt')} images are JPEG or PNG. WebP and AVIF files are typically 25 to 50% smaller at the same quality.`, 'Compress and resize images, serve modern formats and lazy-load below the fold.', 'quick', 'speed');
-    if (sum('notLazy') >= 5) add('Images', 'Low', `${plural(sum('notLazy'), 'image')} not lazy-loaded`, 'Images further down the page download straight away, even if the visitor never scrolls to them.', 'Compress and resize images, serve modern formats and lazy-load below the fold.', 'quick', 'speed', on(p => p.notLazy));
+    if (noAlt) add('Images', noAlt >= 10 ? 'Medium' : 'Low', `${plural(noAlt, 'image')} with no description`, `Out of ${imgs} we checked. The description (alt text) is how Google understands a picture, and what screen readers read aloud.`, 'We’d add a short description to every meaningful image.', 'quick', 'seo', on(p => p.noAlt));
+    if (r.bigImages.length) { const top = Math.max(...r.bigImages.map(b => b.kb)); add('Images', top >= 1000 ? 'High' : 'Medium', `${plural(r.bigImages.length, 'image')} on the homepage ${r.bigImages.length === 1 ? 'is' : 'are'} too big`, `Each is over ${T.imageKB} KB, and the largest is ${top >= 1000 ? (top / 1024).toFixed(1) + ' MB' : top + ' KB'}. Most website images should be under 200 KB.`, IMG, 'quick', 'speed', HP); }
+    if (sum('oldFmt') >= 5 && !sum('newFmt')) add('Images', 'Medium', 'Images are in older, heavier formats', `All ${sum('oldFmt')} are JPEG or PNG. Newer formats like WebP look the same and are usually 25 to 50% smaller.`, IMG, 'quick', 'speed');
+    if (sum('notLazy') >= 5) add('Images', 'Low', `${plural(sum('notLazy'), 'image')} load before they’re needed`, 'Pictures further down the page download straight away, even if the visitor never scrolls that far.', IMG, 'quick', 'speed', on(p => p.notLazy));
 
     // SEO
     pg = on(p => !p.title);
-    if (pg.length) add('SEO', 'High', `${plural(pg.length, 'page')} with no title`, 'The page title is the headline Google shows in search results.', 'Write a unique title and description for every page.', 'quick', 'seo', pg);
+    if (pg.length) add('SEO', 'High', `${plural(pg.length, 'page')} with no title`, 'The title is the headline Google shows in search results. Without one, the page is easy to skip.', TITLES, 'quick', 'seo', pg);
     const dup = k => { const c = {}; P.forEach(p => { if (p[k]) (c[p[k]] = c[p[k]] || []).push(p.path); }); return Object.values(c).filter(v => v.length > 1).flat(); };
     pg = dup('title');
-    if (pg.length) add('SEO', 'Medium', `${pg.length} pages share the same title`, 'Google cannot tell these pages apart in search results.', 'Write a unique title and description for every page.', 'quick', 'seo', pg);
+    if (pg.length) add('SEO', 'Medium', `${pg.length} pages share the same title`, 'Google can’t tell these pages apart, so they end up competing with each other.', TITLES, 'quick', 'seo', pg);
     pg = on(p => !p.desc);
-    if (pg.length) add('SEO', 'Medium', `${plural(pg.length, 'page')} with no meta description`, 'Google has to guess the summary shown under the title in search results.', 'Write a unique title and description for every page.', 'quick', 'seo', pg);
+    if (pg.length) add('SEO', 'Medium', `${plural(pg.length, 'page')} with no description for Google`, 'Google has to guess the summary under the title, and it often guesses badly.', TITLES, 'quick', 'seo', pg);
     pg = dup('desc');
-    if (pg.length) add('SEO', 'Low', `${pg.length} pages share the same meta description`, 'Each page should describe its own content.', 'Write a unique title and description for every page.', 'quick', 'seo', pg);
+    if (pg.length) add('SEO', 'Low', `${pg.length} pages share the same description`, 'Each page should describe what is actually on it.', TITLES, 'quick', 'seo', pg);
     pg = on(p => p.h1 === 0);
-    if (pg.length) add('SEO', 'Medium', `${plural(pg.length, 'page')} with no main heading (H1)`, 'The page gives search engines no clear main topic.', 'Give every page one H1 and headings in order (H1, H2, H3).', 'quick', 'seo', pg);
+    if (pg.length) add('SEO', 'Medium', `${plural(pg.length, 'page')} with no main heading`, 'Without a main heading (H1), Google and visitors can’t quickly tell what the page is about.', HEADS, 'quick', 'seo', pg);
     pg = on(p => p.h1 > 1);
-    if (pg.length) add('SEO', 'Low', `${plural(pg.length, 'page')} with several H1 headings`, 'More than one main heading blurs what the page is about.', 'Give every page one H1 and headings in order (H1, H2, H3).', 'quick', 'seo', pg);
+    if (pg.length) add('SEO', 'Low', `${plural(pg.length, 'page')} with more than one main heading`, 'Several main headings blur what the page is really about.', HEADS, 'quick', 'seo', pg);
     pg = on(p => p.skipped);
-    if (pg.length) add('SEO', 'Low', `Heading levels skipped on ${plural(pg.length, 'page')}`, 'Headings jump levels (for example H2 straight to H4), which confuses screen readers and search engines.', 'Give every page one H1 and headings in order (H1, H2, H3).', 'quick', 'seo', pg);
-    if (r.site.sitemap === false) add('SEO', 'Medium', 'No XML sitemap found', 'A sitemap tells Google which pages exist. Without one, new pages take longer to be found.', 'Generate an XML sitemap and submit it in Google Search Console.', 'quick', 'seo');
-    if (r.site.robots === false) add('SEO', 'Low', 'No robots.txt file', 'This file tells search engines what to crawl and where the sitemap is.', 'Add a robots.txt that points to the sitemap.', 'quick', 'seo');
+    if (pg.length) add('SEO', 'Low', `Headings are out of order on ${plural(pg.length, 'page')}`, 'Headings jump levels (for example straight from H2 to H4), which confuses Google and screen readers.', HEADS, 'quick', 'seo', pg);
+    if (r.site.sitemap === false) add('SEO', 'Medium', 'No sitemap for Google', 'A sitemap is the list of pages you hand to Google. Without it, new pages take longer to be found.', 'We’d create a sitemap and submit it in Google Search Console.', 'quick', 'seo');
+    if (r.site.robots === false) add('SEO', 'Low', 'No robots.txt file', 'This small file tells search engines what to read and where the sitemap is.', 'We’d add one that points to the sitemap.', 'quick', 'seo');
     pg = on(p => !p.canonical);
-    if (pg.length) add('SEO', 'Low', `${plural(pg.length, 'page')} with no canonical tag`, 'Without it, Google may index duplicate versions of the same page.', 'Add canonical tags through an SEO plugin.', 'quick', 'seo', pg);
-    if (!home.og) add('SEO', 'Low', 'No social sharing preview', 'Links shared on WhatsApp and Facebook show no image or summary.', 'Add sharing tags and a preview image.', 'quick', 'seo', HP);
-    if (!home.ld) add('SEO', 'Low', 'No structured data', 'Search engines and AI assistants get no business details in a machine-readable form.', 'Add organisation and service schema.', 'quick', 'seo', HP);
+    if (pg.length) add('SEO', 'Low', `${plural(pg.length, 'page')} that ${pg.length === 1 ? 'doesn’t' : 'don’t'} say which version is the original`, 'Without a canonical tag, Google may list duplicate versions of the same page.', 'We’d add canonical tags with an SEO plugin.', 'quick', 'seo', pg);
+    if (!home.og) add('SEO', 'Low', 'Links look plain when shared', 'Share the link on WhatsApp or Facebook and it shows no picture or summary, so fewer people tap it.', 'We’d add a share image and summary.', 'quick', 'seo', HP);
+    if (!home.ld) add('SEO', 'Low', 'No business details in a form Google can read', 'Search engines and AI assistants get no structured facts about the business, such as its name, services and contact details.', 'We’d add business and service schema.', 'quick', 'seo', HP);
     const t = s.tags || {};
-    if (t.ua && !t.ga4 && !t.gtm) add('SEO', 'Medium', 'Analytics stopped working in 2023', 'The site still carries the retired Universal Analytics tag, so visits are no longer being measured.', 'Install Google Analytics 4 with conversion tracking.', 'quick', 'seo');
-    else if (!t.ga4 && !t.gtm && !t.ua) add('SEO', 'Low', 'No analytics tag visible', 'We could not see Google Analytics or Tag Manager in the page, so visits and leads may not be measured.', 'Install Google Analytics 4 with conversion tracking.', 'quick', 'seo');
+    if (t.ua && !t.ga4 && !t.gtm) add('SEO', 'Medium', 'Visitor tracking stopped working in 2023', 'The site still uses the old Google Analytics, which Google switched off. Visits aren’t being counted any more.', GA, 'quick', 'seo');
+    else if (!t.ga4 && !t.gtm && !t.ua) add('SEO', 'Low', 'We couldn’t see any visitor tracking', 'No Google Analytics or Tag Manager showed up in the page, so visits and enquiries may not be measured.', GA, 'quick', 'seo');
 
     // Design: signs of a dated or broken look. Read from the homepage and from Google's test of it.
-    const g = home.design || {}, L = (m && m.design) || {}, RV = ['revamp', 'revamp'];
-    if (L.contrast) add('Design', L.contrast >= 5 ? 'Medium' : 'Low', `Low-contrast text in ${plural(L.contrast, 'place')}`, 'Text that is too pale against its background is hard to read, especially on a phone outdoors.', 'Adjust text and background colours so everything is easy to read.', 'quick', 'revamp', HP);
-    if (L.taps) add('Design', 'Medium', `${plural(L.taps, 'button or link', 'buttons or links')} too small or too close to tap`, 'On a phone these are easy to miss or to tap by mistake.', 'Make buttons and links at least 48 px tall with space between them.', 'quick', 'revamp', HP);
-    if (L.stretched) add('Design', 'Medium', `${plural(L.stretched, 'image')} stretched out of shape`, 'Images shown at the wrong proportions make a site look careless.', 'Crop images to the proportions of the space they sit in.', 'quick', 'revamp', HP);
-    if (L.blurry) add('Design', 'Low', `${plural(L.blurry, 'image')} blurry on sharp screens`, 'The image files are smaller than the space they fill, so they blur on modern phones.', 'Supply images at twice their displayed size.', 'quick', 'revamp', HP);
+    const g = home.design || {}, L = (m && m.design) || {}, RV = ['revamp', 'revamp'], OLD = { dated: true };
+    if (L.contrast) add('Design', L.contrast >= 5 ? 'Medium' : 'Low', `Some text is hard to read (${plural(L.contrast, 'place')})`, 'The text is too pale against its background. It’s a strain to read, especially on a phone outdoors.', 'We’d adjust the colours so everything is easy to read.', 'quick', 'revamp', HP);
+    if (L.taps) add('Design', 'Medium', `${plural(L.taps, 'button or link', 'buttons or links')} hard to tap`, 'They’re too small or too close together, so on a phone people miss, or tap the wrong one.', 'We’d make buttons bigger, with more space around them.', 'quick', 'revamp', HP);
+    if (L.stretched) add('Design', 'Medium', `${plural(L.stretched, 'image')} look${L.stretched === 1 ? 's' : ''} stretched`, 'Pictures shown in the wrong shape make a site look careless.', 'We’d crop the images to fit their space properly.', 'quick', 'revamp', HP);
+    if (L.blurry) add('Design', 'Low', `${plural(L.blurry, 'image')} look${L.blurry === 1 ? 's' : ''} blurry on newer phones`, 'The files are smaller than the space they fill, so they blur on sharp screens.', 'We’d supply sharper versions.', 'quick', 'revamp', HP);
     const cls = m && m.metrics.find(x => x.id === 'cumulative-layout-shift');
-    if (cls && cls.value > 0.25) add('Design', 'Medium', 'Content jumps around while loading', `Layout shift is ${cls.display}; Google\u2019s limit for a good experience is 0.1. Visitors lose their place or tap the wrong thing.`, 'Reserve space for images, banners and fonts so nothing moves.', 'quick', 'speed', HP);
-    if (g.sliders) add('Design', 'Low', 'Rotating banner slider on the homepage', 'Sliders are an older pattern. Most visitors only see the first slide, and they slow the page down.', 'Replace the slider with one strong image and message.', ...RV, HP, { dated: true });
-    if (g.gfonts > 3) add('Design', 'Low', `${g.gfonts} different font families`, 'More than two or three fonts makes a site look inconsistent, and each one slows it down.', 'Settle on one heading font and one body font.', ...RV, HP);
-    if (g.gifs >= 3) add('Design', 'Low', `${g.gifs} animated GIF images`, 'Looping GIFs distract from the message and are heavy to load.', 'Replace GIFs with still images or short muted video.', ...RV, HP, { dated: true });
-    if (g.bestViewed) add('Design', 'Medium', 'Leftovers from an older era of the web', 'Notes such as \u201cbest viewed in\u201d or a visitor counter date the site instantly.', 'Rebuild the page with a current design.', ...RV, HP, { dated: true });
-    if (g.autoplay) add('Design', 'Medium', 'Sound or video plays by itself', 'Unexpected sound is one of the fastest ways to make visitors leave.', 'Let visitors choose to play media.', 'quick', 'maintenance', HP);
-    if (g.popups) add('Design', 'Low', 'Uses a pop-up plugin', 'Pop-ups that appear on arrival interrupt visitors before they have read anything, and Google may rank pages with intrusive mobile pop-ups lower.', 'Show offers inside the page, or delay pop-ups until the visitor has engaged.', 'quick', 'maintenance', HP);
-    if (!g.cta) add('Design', 'Medium', 'No clear call to action on the homepage', 'We found no button or link inviting visitors to contact, book, buy or enquire.', 'Add one clear call-to-action button near the top of every key page.', ...RV, HP);
-    if (!g.tel && !g.wa) add('Design', 'Low', 'No tap-to-call or WhatsApp link', 'Mobile visitors cannot reach the business in one tap.', 'Add click-to-call and WhatsApp buttons.', 'quick', 'maintenance', HP);
-    if (g.longForm > 8) add('Design', 'Low', `Long form (${g.longForm} fields)`, 'Every extra field loses some of the people who started filling it in.', 'Cut forms down to the few fields needed to reply.', 'quick', 'maintenance', HP);
-    if (!g.proof) add('Design', 'Low', 'No testimonials or reviews on the homepage', 'Proof from real customers is one of the strongest reasons visitors trust a business.', 'Add real client reviews or testimonials.', ...RV, HP);
-    if (g.navItems > 9) add('Design', 'Low', `Crowded main menu (${g.navItems} items)`, 'Too many choices make it harder for visitors to find the one they need.', 'Group the menu into five to seven clear items.', ...RV, HP);
-    if (g.inlineStyles > 150) add('Design', 'Low', 'Heavily hand-patched styling', `${g.inlineStyles} elements carry one-off styles, a sign of years of quick fixes on top of the original design.`, 'Rebuild the page with a current design.', ...RV, HP, { dated: true });
+    if (cls && cls.value > 0.25) add('Design', 'Medium', 'Things jump around while the page loads', `Text and buttons shift as images and banners appear (layout shift ${cls.display}; Google’s limit is 0.1). People lose their place or tap the wrong thing.`, 'We’d reserve space for images and banners so nothing moves.', 'quick', 'speed', HP);
+    if (g.sliders) add('Design', 'Low', 'Rotating banner on the homepage', 'Sliders are an older style. Most visitors only ever see the first slide, and they slow the page down.', 'We’d swap it for one strong image and message.', ...RV, HP, OLD);
+    if (g.gfonts > 3) add('Design', 'Low', `${g.gfonts} different fonts in use`, 'More than two or three fonts makes a site look messy, and each one slows it down.', 'We’d settle on one font for headings and one for text.', ...RV, HP);
+    if (g.gifs >= 3) add('Design', 'Low', `${g.gifs} animated GIFs`, 'Looping animations pull attention away from the message, and they’re heavy to load.', 'We’d replace them with still images or short video.', ...RV, HP, OLD);
+    if (g.bestViewed) add('Design', 'Medium', 'Leftovers from an older era of the web', 'Things like “best viewed in” notes or a visitor counter make the site look years out of date.', FRESH, ...RV, HP, OLD);
+    if (g.autoplay) add('Design', 'Medium', 'Sound or video starts by itself', 'Unexpected sound is one of the quickest ways to make someone close the page.', 'We’d let visitors press play themselves.', 'quick', 'maintenance', HP);
+    if (g.popups) add('Design', 'Low', 'Pop-ups get in the way', 'A pop-up plugin is installed. Pop-ups that appear straight away interrupt people before they’ve read anything, and Google may rank pages with intrusive mobile pop-ups lower.', 'We’d show offers inside the page, or wait until the visitor has had a look around.', 'quick', 'maintenance', HP);
+    if (!g.cta) add('Design', 'Medium', 'No clear next step for visitors', 'We couldn’t find a button inviting people to contact, book, buy or enquire. Interested visitors have nowhere obvious to go.', 'We’d add one clear call-to-action button near the top of every key page.', ...RV, HP);
+    if (!g.tel && !g.wa) add('Design', 'Low', 'No one-tap call or WhatsApp button', 'Someone on a phone can’t reach the business in one tap.', 'We’d add click-to-call and WhatsApp buttons.', 'quick', 'maintenance', HP);
+    if (g.longForm > 8) add('Design', 'Low', `The form is long (${g.longForm} fields)`, 'Every extra field loses some of the people who started filling it in.', 'We’d cut it down to the few details needed to reply.', 'quick', 'maintenance', HP);
+    if (!g.proof) add('Design', 'Low', 'No customer reviews on the homepage', 'Reviews and testimonials are one of the biggest reasons people trust a business they’ve only just found.', 'We’d add real reviews or testimonials.', ...RV, HP);
+    if (g.navItems > 9) add('Design', 'Low', `The main menu is crowded (${g.navItems} items)`, 'Too many choices make it harder to find the right one.', 'We’d group the menu into five to seven clear items.', ...RV, HP);
+    if (g.inlineStyles > 150) add('Design', 'Low', 'Years of quick fixes show in the code', `${g.inlineStyles} elements carry one-off styling, which usually means patches on top of patches. It makes the look inconsistent and every change risky.`, FRESH, ...RV, HP, OLD);
     const builders = s.items.filter(i => i.group === 'Page builder' && !/Elementor Pro|block editor|Not detected/.test(i.name)).map(i => i.name);
-    if (builders.length >= 2) add('Design', 'Low', `Two page builders in use (${builders.slice(0, 2).join(' and ')})`, 'Mixing builders gives pages slightly different looks and loads two sets of code.', 'Rebuild the key pages in Elementor so they are easier to edit and maintain.', ...RV);
-    if (!g.favicon && r.site.favicon === false) add('Design', 'Low', 'No favicon', 'The browser tab and bookmarks show a blank icon where the logo should be.', 'Add a favicon made from the logo.', 'quick', 'maintenance');
+    if (builders.length >= 2) add('Design', 'Low', `Two page builders are mixed (${builders.slice(0, 2).join(' and ')})`, 'Pages built with different tools look slightly different from each other and load two sets of code.', 'We’d rebuild the key pages in Elementor so everything matches and is easy to edit.', ...RV);
+    if (!g.favicon && r.site.favicon === false) add('Design', 'Low', 'No little logo in the browser tab', 'The tab and bookmarks show a blank icon where the logo should be.', 'We’d add a favicon made from the logo.', 'quick', 'maintenance');
 
     // Mobile and accessibility
     pg = on(p => !p.viewport);
-    if (pg.length) add('Accessibility', 'Critical', 'Not built for mobile screens', 'No mobile viewport setting, so phones show a shrunken desktop page.', 'Rebuild on a responsive layout that adapts to every screen size.', 'revamp', 'revamp', pg);
+    if (pg.length) add('Accessibility', 'Critical', 'The site isn’t made for phones', 'Phones show a shrunken desktop page that people have to pinch and zoom. Most visitors today are on phones.', FLEX, 'revamp', 'revamp', pg, { noMobile: true });
     pg = on(p => p.legacy >= 3);
-    if (pg.length) add('Design', 'High', 'Built with outdated layout code', 'Uses table, font or center tags. Websites stopped being built this way over a decade ago, and it does not adapt to phones.', 'Rebuild on a responsive layout that adapts to every screen size.', 'revamp', 'revamp', pg, { dated: true });
-    if (sum('unlabelled')) add('Accessibility', sum('unlabelled') >= 5 ? 'Medium' : 'Low', `${plural(sum('unlabelled'), 'form field')} without a label`, 'Screen readers cannot tell the visitor what to type, and it weakens autofill.', 'Add a proper label to every form field.', 'quick', 'maintenance', on(p => p.unlabelled));
+    if (pg.length) add('Design', 'High', 'The layout is built the old way', 'The page uses layout code from the 2000s (tables and font tags). It looks dated and doesn’t adapt to phones.', FLEX, 'revamp', 'revamp', pg, OLD);
+    if (sum('unlabelled')) add('Accessibility', sum('unlabelled') >= 5 ? 'Medium' : 'Low', `${plural(sum('unlabelled'), 'form field')} with no label`, 'People using screen readers can’t tell what to type, and autofill works less well.', 'We’d label every form field properly.', 'quick', 'maintenance', on(p => p.unlabelled));
 
     // Security and upkeep
-    if (!/^https:/i.test(home.url)) add('Security', 'Critical', 'No secure connection (HTTPS)', 'Browsers label the site “Not secure”, which puts visitors off filling in forms.', 'Install an SSL certificate and force HTTPS on every page.', 'quick', 'maintenance');
+    if (!/^https:/i.test(home.url)) add('Security', 'Critical', 'The site isn’t secure (no HTTPS)', 'Browsers show a “Not secure” warning, which puts people off filling in forms.', 'We’d install an SSL certificate and switch every page to HTTPS.', 'quick', 'maintenance');
     pg = on(p => p.mixed);
-    if (pg.length) add('Security', 'Medium', 'Insecure files on secure pages', `${plural(sum('mixed'), 'file')} still load over plain http, which browsers may block or flag.`, 'Load every image, script and stylesheet over HTTPS.', 'quick', 'maintenance', pg);
-    if (P.some(p => p.flash)) add('Design', 'High', 'Uses Flash content', 'Flash was shut down in 2020 and no longer plays in any browser.', 'Replace Flash with video or modern animation.', 'revamp', 'revamp', on(p => p.flash), { dated: true });
+    if (pg.length) add('Security', 'Medium', 'Some files still load the insecure way', `${plural(sum('mixed'), 'file')} load over plain http on secure pages, so browsers may block them or show a warning.`, 'We’d switch every image, script and style to HTTPS.', 'quick', 'maintenance', pg);
+    if (P.some(p => p.flash)) add('Design', 'High', 'The site still uses Flash', 'Flash was shut down in 2020 and no longer plays in any browser, so that part of the site is simply blank.', 'We’d replace it with video or modern animation.', 'revamp', 'revamp', on(p => p.flash), OLD);
     const H = r.site.headers || {}, miss = ['strict-transport-security', 'content-security-policy', 'x-frame-options', 'x-content-type-options', 'referrer-policy'].filter(k => !H[k]);
-    if (miss.length >= 3) add('Security', 'Low', `${miss.length} of 5 security headers missing`, 'These server settings protect visitors against common attacks such as clickjacking.', 'Add the standard security headers at the server or CDN.', 'quick', 'maintenance');
+    if (miss.length >= 3) add('Security', 'Low', `${miss.length} of 5 security settings are missing`, 'These are server settings that protect visitors from common tricks such as clickjacking.', 'We’d add the standard security headers.', 'quick', 'maintenance');
   }
-  if (r.read && r.read.finding) add('Security', 'Critical', r.read.title, r.read.why, 'Get the site back online and reachable before anything else.', 'quick', 'maintenance');
-  if (s.wp && s.wp.status === 'bad') add('Security', 'High', `WordPress is ${plural(s.wp.behind, 'release')} behind`, `Running ${s.wp.version}; the latest is ${s.wp.latest}. Old versions miss security fixes and are targeted by automated attacks.`, 'Update WordPress, the theme and plugins on a staging copy, then keep them current every month.', 'maintenance', 'maintenance');
-  else if (s.wp && s.wp.status === 'warn') add('Security', 'Medium', 'WordPress update pending', `Running ${s.wp.version}; the latest is ${s.wp.latest}.`, 'Update WordPress, the theme and plugins on a staging copy, then keep them current every month.', 'maintenance', 'maintenance');
-  if (s.elementor && (s.elementor.status === 'bad' || s.elementor.status === 'warn')) add('Security', s.elementor.status === 'bad' ? 'Medium' : 'Low', 'Elementor is behind', `Running ${s.elementor.version}; the latest is ${s.elementor.latest}.`, 'Update WordPress, the theme and plugins on a staging copy, then keep them current every month.', 'maintenance', 'maintenance');
-  if (s.outdatedPlugins && s.outdatedPlugins.length) add('Security', s.outdatedPlugins.length >= 3 ? 'High' : 'Medium', `${plural(s.outdatedPlugins.length, 'plugin')} out of date`, `${s.outdatedPlugins.slice(0, 4).join(', ')}${s.outdatedPlugins.length > 4 ? ' and more' : ''}. Outdated plugins are a leading cause of hacked WordPress sites.`, 'Update WordPress, the theme and plugins on a staging copy, then keep them current every month.', 'maintenance', 'maintenance');
-  if (s.php && s.php.old) add('Security', 'High', `Server runs PHP ${s.php.version}`, 'This PHP version no longer gets security fixes, and newer versions run noticeably faster.', 'Move to a current PHP version, or to better hosting.', 'maintenance', 'maintenance');
-  if (s.jquery && +s.jquery.split('.')[0] < 3) add('Security', 'Low', `Runs an old jQuery (${s.jquery})`, 'jQuery 1 and 2 are no longer maintained and have known security issues.', 'Update outdated front-end libraries.', 'maintenance', 'maintenance');
-  if (s.bootstrap && +s.bootstrap.split('.')[0] <= 3) add('Design', 'Medium', `Built on Bootstrap ${s.bootstrap.split('.')[0]}`, 'This framework version stopped receiving updates in 2019, a sign the site has not been rebuilt for years.', 'Update outdated front-end libraries.', 'revamp', 'revamp', null, { dated: true });
-  if (s.domain && s.domain.soon) add('Security', 'High', `Domain expires on ${s.domain.expiresText}`, 'If the domain lapses, the website and email stop working.', 'Renew the domain and switch on auto-renew.', 'quick', 'maintenance');
+  if (r.read && r.read.finding) add('Security', 'Critical', r.read.title, r.read.why, 'We’d get the site back online and reachable before anything else.', 'quick', 'maintenance');
+  if (s.wp && s.wp.status === 'bad') add('Security', 'High', `WordPress is ${plural(s.wp.behind, 'version')} behind`, `It runs ${s.wp.version} and the latest is ${s.wp.latest}. Old versions miss security fixes and are an easy target for automated attacks.`, UPD, 'maintenance', 'maintenance');
+  else if (s.wp && s.wp.status === 'warn') add('Security', 'Medium', 'WordPress has an update waiting', `It runs ${s.wp.version} and the latest is ${s.wp.latest}.`, UPD, 'maintenance', 'maintenance');
+  if (s.elementor && (s.elementor.status === 'bad' || s.elementor.status === 'warn')) add('Security', s.elementor.status === 'bad' ? 'Medium' : 'Low', 'Elementor is behind on updates', `It runs ${s.elementor.version} and the latest is ${s.elementor.latest}.`, UPD, 'maintenance', 'maintenance');
+  if (s.outdatedPlugins && s.outdatedPlugins.length) add('Security', s.outdatedPlugins.length >= 3 ? 'High' : 'Medium', `${plural(s.outdatedPlugins.length, 'plugin')} need${s.outdatedPlugins.length === 1 ? 's' : ''} updating`, `${s.outdatedPlugins.slice(0, 4).join(', ')}${s.outdatedPlugins.length > 4 ? ' and more' : ''}. Out-of-date plugins are a leading cause of hacked WordPress sites.`, UPD, 'maintenance', 'maintenance');
+  if (s.php && s.php.old) add('Security', 'High', `The server runs an old PHP (${s.php.version})`, 'PHP is the engine behind the site. This version no longer gets security fixes, and newer ones are noticeably faster.', 'We’d move the site to a current PHP version, or to better hosting.', 'maintenance', 'maintenance');
+  if (s.jquery && +s.jquery.split('.')[0] < 3) add('Security', 'Low', `An old code library is in use (jQuery ${s.jquery})`, 'This version is no longer maintained and has known security holes.', 'We’d update the old code libraries.', 'maintenance', 'maintenance');
+  if (s.bootstrap && +s.bootstrap.split('.')[0] <= 3) add('Design', 'Medium', `Built on an old framework (Bootstrap ${s.bootstrap.split('.')[0]})`, 'This version stopped getting updates in 2019. It’s a sign the site hasn’t been rebuilt in years.', FRESH, 'revamp', 'revamp', null, { dated: true });
+  if (s.domain && s.domain.soon) add('Security', 'High', `The domain expires on ${s.domain.expiresText}`, 'If it lapses, the website and email both stop working.', 'We’d renew it and switch on auto-renew.', 'quick', 'maintenance');
   return out.sort((a, b) => ORDER[a.sev] - ORDER[b.sev]);
+}
+
+// Why each score is what it is, in a few plain sentences. Speed gets the detail: where the weight and the waiting go.
+export function whyOf(r) {
+  const m = ok(r.psi.mobile), out = [], mb = k => (k >= 1024 ? (k / 1024).toFixed(1) + ' MB' : k + ' KB');
+  if (m && r.health.sub.Performance != null) {
+    const L = [], w = m.why || {}, b = w.bytes, met = id => m.metrics.find(x => x.id === id) || {}, lcp = met('largest-contentful-paint'), tbt = met('total-blocking-time');
+    if (b && b.total) {
+      const parts = [['Images are', b.image], ['Code (scripts) is', b.script], ['Styling is', b.css], ['Fonts are', b.font], ['Video is', b.media]].sort((x, y) => y[1] - x[1]), [what, size] = parts[0];
+      if (size > 400 && size / b.total >= 0.4) L.push(`${what} the heaviest part of the page: ${mb(size)} out of ${mb(b.total)}. That’s the main thing slowing it down.`);
+      else if (b.total > 2000) L.push(`The page weighs ${mb(b.total)}, spread across images (${mb(b.image)}), code (${mb(b.script)}) and styling (${mb(b.css)}).`);
+      if (b.script > 500 && !/^Code/.test(what)) L.push(`There’s ${mb(b.script)} of code in ${b.scripts} script files. A phone has to download and run all of it before the page feels ready.`);
+      if (b.thirdHosts >= 5 && b.thirdKb > 300) L.push(`${b.thirdHosts} outside services, such as chat widgets, trackers and embeds, add another ${mb(b.thirdKb)}.`);
+      if (b.requests > 100) L.push(`The page asks for ${b.requests} separate files, and each one is another trip to the server.`);
+    }
+    if (w.ttfb > 800) L.push(`The server takes ${(w.ttfb / 1000).toFixed(1)} seconds just to answer, before anything can start loading. That points to the hosting.`);
+    if (w.unusedJs > 150) L.push(`About ${mb(w.unusedJs)} of the code that loads is never used on this page.`);
+    if (tbt.score != null && tbt.score < 50) L.push(`Scripts keep the phone busy for ${tbt.display}, so taps and scrolling feel laggy.`);
+    if (lcp.score != null && lcp.score < 50 && L.length < 4) L.push(`The main content takes ${lcp.display} to show up. People expect about 2.5 seconds.`);
+    if (!L.length) for (const x of r.issues.filter(i => i.cat === 'Performance' && i.win).slice(0, 2)) L.push(`${x.title}. ${x.detail}`);
+    out.push({ cat: 'Performance', score: r.health.sub.Performance, lines: L.slice(0, 4), fine: 'It loads quickly on phones and computers.' });
+  }
+  const FINE = { SEO: 'The search basics are in place.', Design: 'Nothing looks dated or broken.', Content: 'No dummy text, dead links or empty pages.', Images: 'Images are described, sized and loaded sensibly.', Accessibility: 'It works well on phones and for screen readers.', Security: 'It’s secure and up to date.' };
+  for (const c of CATS) if (c !== 'Performance' && r.health.sub[c] != null) out.push({ cat: c, score: r.health.sub[c], lines: r.issues.filter(i => i.cat === c).slice(0, 3).map(i => `${i.title}. ${i.detail}`), fine: FINE[c] });
+  return out;
 }
 
 // Health Score out of 100 with a sub-score per category. Unmeasured categories are left out, not guessed.
@@ -252,13 +288,13 @@ export function strengthsOf(r) {
 
 // Design verdict from the Design findings. Rules catch dated or broken design; they cannot judge taste.
 export function designOf(r) {
-  const NOTE = 'These checks catch dated or broken design. They cannot judge taste, so have a designer look before you pitch.';
+  const NOTE = 'These checks spot design that looks dated or broken. They can’t judge taste, so get a designer’s eye on it before you pitch.';
   if (!r.pages || !r.pages.length) return { tone: 'info', label: 'Not checked', note: 'The site could not be read, so its design was not checked.' };
-  const d = r.issues.filter(i => i.cat === 'Design'), noMobile = r.issues.some(i => i.title === 'Not built for mobile screens');
+  const d = r.issues.filter(i => i.cat === 'Design'), noMobile = r.issues.some(i => i.noMobile);
   const cost = d.reduce((t, i) => t + COST[i.sev], 0) + (noMobile ? 30 : 0), dated = d.filter(i => i.dated);
   // "Dated" needs real signs of age (old layout code, sliders, leftovers), not just polish issues like contrast.
-  if (noMobile || dated.some(i => i.sev === 'High') || dated.length >= 2 || cost >= 70) return { tone: 'bad', label: 'Looks dated, a redesign is recommended', note: NOTE };
-  if (cost >= 15) return { tone: 'warn', label: 'Design needs attention', note: NOTE };
+  if (noMobile || dated.some(i => i.sev === 'High') || dated.length >= 2 || cost >= 70) return { tone: 'bad', label: 'Looks dated, time for a fresh design', note: NOTE };
+  if (cost >= 15) return { tone: 'warn', label: 'The design needs some attention', note: NOTE };
   return { tone: 'good', label: 'No design red flags', note: NOTE };
 }
 
@@ -277,11 +313,11 @@ export function skillsFit(stack, cfg) {
 export function nextSteps(r, cfg) {
   const g = { quick: [], revamp: [], maintenance: [] }, seen = new Set(), P = cfg.packages;
   const tone = r.stack.verdict.tone, kind = r.stack.platform ? r.stack.platform.kind : '';
-  if (kind && kind !== 'wordpress' && (tone === 'bad' || tone === 'warn')) g.revamp.push({ text: 'Rebuild the site on WordPress with Elementor, so the client owns it and their team can edit pages without a developer.', pkg: P.revamp });
-  else if (kind === 'wordpress' && r.stack.builder && r.stack.builder.id !== 'elementor') g.revamp.push({ text: 'Rebuild the key pages in Elementor so they are easier to edit and maintain.', pkg: P.revamp });
-  if (r.design && r.design.tone === 'bad') g.revamp.push({ text: 'Redesign the site with a current, mobile-first look and one clear call to action.', pkg: P.revamp });
+  if (kind && kind !== 'wordpress' && (tone === 'bad' || tone === 'warn')) g.revamp.push({ text: 'We’d rebuild the site on WordPress with Elementor, so the client owns it and their own team can edit pages without calling a developer.', pkg: P.revamp });
+  else if (kind === 'wordpress' && r.stack.builder && r.stack.builder.id !== 'elementor') g.revamp.push({ text: 'We’d rebuild the key pages in Elementor so they’re easier to edit and look after.', pkg: P.revamp });
+  if (r.design && r.design.tone === 'bad') g.revamp.push({ text: 'We’d give the site a fresh, modern look that works on phones first, with one clear call to action.', pkg: P.revamp });
   for (const i of r.issues) { if (seen.has(i.fix)) continue; seen.add(i.fix); g[i.group].push({ text: i.fix, pkg: P[i.pkg] }); }
-  if (kind === 'wordpress' && !g.maintenance.length) g.maintenance.push({ text: 'Keep WordPress, the theme and plugins updated every month, with backups and uptime monitoring.', pkg: P.maintenance });
+  if (kind === 'wordpress' && !g.maintenance.length) g.maintenance.push({ text: 'We’d keep WordPress, the theme and plugins updated every month, with backups and uptime checks.', pkg: P.maintenance });
   for (const k in g) g[k] = g[k].slice(0, 7);
   return g;
 }
@@ -289,9 +325,9 @@ export function nextSteps(r, cfg) {
 export function verdictOf(r) {
   const h = r.health.score, tone = r.stack.verdict.tone;
   const top = r.issues.filter(i => (i.sev === 'Critical' || i.sev === 'High') && !i.win).slice(0, 3).map(i => i.title);
-  const list = (top.length ? ` Biggest issues: ${top.join('; ')}.` : '') + (ok(r.psi.mobile) || ok(r.psi.desktop) ? '' : ' Speed was not measured in this scan.');
+  const list = (top.length ? ` The biggest issues: ${top.join('; ')}.` : '') + (ok(r.psi.mobile) || ok(r.psi.desktop) ? '' : ' Speed was not measured in this scan.');
   if (h == null) return { tone: 'info', label: 'Not enough data', summary: 'The site could not be read and the speed test did not run. Try the scan again later.' };
-  if (h < 60 || (tone === 'bad' && h < 75) || r.issues.filter(i => i.sev === 'Critical').length >= 2 || (r.design && r.design.tone === 'bad' && h < 75)) return { tone: 'bad', label: 'Strong case for a revamp', summary: `There is a lot to fix here, and a revamp will be easier to justify than patching.${list}` };
-  if (h < 80 || tone === 'bad') return { tone: 'warn', label: 'Clear room to improve', summary: `The site works, but it is leaving results on the table.${list}` };
-  return { tone: 'good', label: 'In good shape', summary: `This site is in good shape on the things we can measure, so lead with design, content or marketing.${list}` };
+  if (h < 60 || (tone === 'bad' && h < 75) || r.issues.filter(i => i.sev === 'Critical').length >= 2 || (r.design && r.design.tone === 'bad' && h < 75)) return { tone: 'bad', label: 'Strong case for a revamp', summary: `There’s quite a lot to fix here, so a full revamp makes more sense than patching things one by one.${list}` };
+  if (h < 80 || tone === 'bad') return { tone: 'warn', label: 'Room to improve', summary: `The site works, but it’s leaving results on the table.${list}` };
+  return { tone: 'good', label: 'In good shape', summary: `This site is in good shape on everything we can measure, so lead with design, content or marketing ideas.${list}` };
 }
