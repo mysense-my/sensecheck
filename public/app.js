@@ -433,7 +433,7 @@ function renderResult() {
         <span class="label">Website health</span>
         <div class="health"><b>${h.score ?? '–'}</b><span>out of 100</span></div>
         ${r.prev && r.prev.score != null ? `<p class="prev">Was ${r.prev.score} on ${fmt(r.prev.date)}</p>` : ''}
-        <div class="rows">${CATS.map(c => `<div class="row"><i class="dot ${htone(h.sub[c])}"></i>${CAT_NAME[c]}<b>${h.sub[c] ?? '<small>Not measured</small>'}</b></div>`).join('')}</div>
+        <div class="rows">${CATS.map(c => `<div class="row"><i class="dot ${htone(h.sub[c])}"></i><span>${CAT_NAME[c]}</span><b>${h.sub[c] ?? '<small>Not measured</small>'}</b></div>`).join('')}</div>
       </div>
       <div class="col chartcol">
         <div class="chart-head"><h3>Scores by device</h3>${LEGEND}</div>
