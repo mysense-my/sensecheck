@@ -86,7 +86,7 @@ export function techBrand(name) {
 export const techSvg = b => `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="96" height="96"><path fill="#${b.hex}" d="${b.path}"/></svg>`;
 // The little icon tile shown in front of a tech name. Falls back to a line drawing or the first letter.
 export function techIcon(name, group) {
-  const n = clean(name), b = techBrand(n);
+  const n = clean(name), b = group === 'Domain' ? null : techBrand(n); // a domain is a name, not a product, so it never gets a brand logo
   if (b) return `<span class="ti" aria-hidden="true"><svg viewBox="0 0 24 24"><path fill="#${b.hex}" d="${b.path}"/></svg></span>`;
   const line = /^not detected/i.test(n) ? 'none' : /certificate|ssl/i.test(n) ? 'lock' : group === 'Domain' ? 'globe' : '';
   if (line) return `<span class="ti line" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">${LINE[line]}</svg></span>`;

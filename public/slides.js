@@ -285,7 +285,7 @@ export async function makeSlides(r, mode, o, k) {
   {
     const s = slide(M('Technology', 'Teknologi'), M('Read from the public pages of the site', 'Dibaca daripada halaman awam laman web'));
     const v = r.stack.verdict, show = r.stack.items.filter(q => !/^Not detected|^PHP version/.test(q.name) && (int || !['Plugins', 'Libraries', 'Domain'].includes(q.group))).slice(0, int ? 12 : 8);
-    const icons = await Promise.all(show.map(q => { const b = techBrand(q.name); return b ? pic('data:image/svg+xml;charset=utf-8,' + encodeURIComponent(techSvg(b)), 'image/png', 96) : null; }));
+    const icons = await Promise.all(show.map(q => { const b = q.group === 'Domain' ? null : techBrand(q.name); return b ? pic('data:image/svg+xml;charset=utf-8,' + encodeURIComponent(techSvg(b)), 'image/png', 96) : null; }));
     const lw = 6.3, rows = Math.max(1, show.length), rh = Math.min(0.62, 4.6 / rows);
     box(s, L, 1.7, lw, 4.9);
     if (!show.length) text(s, M('The platform could not be detected from the public pages.', 'Platform tidak dapat dikesan daripada halaman awam.'), { x: L + 0.3, y: 1.95, w: lw - 0.6, h: 0.8, fontSize: 13, color: C.ink2 });
