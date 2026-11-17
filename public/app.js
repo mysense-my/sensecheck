@@ -1219,6 +1219,7 @@ function spy() {
 window.addEventListener('scroll', () => { watchScroll(); if (!spyWait) spyWait = setTimeout(spy, 70); }, { passive: true });
 
 document.addEventListener('click', e => {
+  if (modal.classList.contains('out') && modal.contains(e.target)) return;   // a dialog that is closing takes no more presses
   const bud = e.target.closest('[data-buddy]');
   if (bud) return buddyAct(bud.dataset.buddy);
   const pet = e.target.closest('.mascot');
@@ -1230,13 +1231,14 @@ document.addEventListener('click', e => {
   else if (t.dataset.open) { const name = t.closest('tr') && t.closest('tr').querySelector('td b'), from = name ? name.getBoundingClientRect() : null; H.get(t.dataset.open).then(r => r && open(r, from)).catch(e => toast(e.message)); }
   else if (t.dataset.remove) {   // the row slides away first, then the list is drawn again without it
     const row = t.closest('tr'); if (row) row.classList.add('leaving');
-    Promise.all([H.remove(t.dataset.remove), sleep(calm.matches ? 0 : 240)]).then(render).catch(e => { if (row) row.classList.remove('leaving'); toast(e.message); });
+    Promise.all([H.remove(t.dataset.remove), sleep(calm.matches ? 0 : 240)]).then(() => { if (S.route === 'new' || S.route === 'history') render(); }).catch(e => { if (row) row.classList.remove('leaving'); toast(e.message); });
   }
   else if ('rescan' in t.dataset) runScan(S.result.url);
   else if (t.id === 'more') { S.more = !S.more; drawRows(); }
 });
 document.addEventListener('submit', e => {
   e.preventDefault();
+  if (modal.classList.contains('out')) return;   // pressed twice: the first press already closed the dialog
   if (e.target.id === 'f') runScan($('#u').value);
   if (e.target.id === 'rival-f') { const v = $('#rival-u').value.trim(); if (!v) return toast('Paste the competitor\u2019s link first.'); closeModal(); runScan(v, { vsFor: S.result }); }
   if (e.target.id === 'pdf-f') {

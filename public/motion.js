@@ -38,7 +38,10 @@ export function movePill(nav) {
   pill.style.transition = '';
   put(to); pillAt = to;
 }
-window.addEventListener('resize', () => { pillAt = null; const nav = document.getElementById('nav'); if (nav) movePill(nav); });
+// Measured again when the window changes size or the web font arrives (both change the width of the items).
+const remeasure = () => { pillAt = null; const nav = document.getElementById('nav'); if (nav) movePill(nav); moveThumbs(document, true); };
+window.addEventListener('resize', remeasure);
+if (document.fonts && document.fonts.addEventListener) document.fonts.addEventListener('loadingdone', remeasure);
 
 // ---------- segmented controls (file type, language): a thumb slides to the chosen part
 export function moveThumbs(scope = document, still = false) {
@@ -75,21 +78,22 @@ export function sheetOut(modal, done) {
 }
 // On phones a sheet can be dragged down by its handle or title and let go to close it.
 export function sheetDrag(modal, close) {
-  let sheet = null, y0 = 0, dy = 0, t0 = 0, live = false;
+  let sheet = null, y0 = 0, dy = 0, t0 = 0, live = false, pid = null;
   modal.addEventListener('pointerdown', e => {
+    if (live || e.button > 0) return;                     // one finger at a time, main button only
     sheet = modal.querySelector('.sheet');
     if (!sheet || !phone.matches || !modal.classList.contains('in') || !e.target.closest('.grab, .sheet > h3')) return;
-    live = true; y0 = e.clientY; dy = 0; t0 = e.timeStamp; sheet.style.transition = 'none';
+    live = true; pid = e.pointerId; y0 = e.clientY; dy = 0; t0 = e.timeStamp; sheet.style.transition = 'none';
     try { sheet.setPointerCapture(e.pointerId); } catch { /* not every browser lets a non-button capture */ }
   });
   modal.addEventListener('pointermove', e => {
-    if (!live) return;
+    if (!live || e.pointerId !== pid) return;
     dy = e.clientY - y0;
     sheet.style.transform = `translateY(${dy > 0 ? dy : dy / 5}px)`;                     // pulling up only gives a little, like a rubber band
     modal.style.setProperty('--dim', String(Math.max(0, 1 - Math.max(0, dy) / Math.max(1, sheet.offsetHeight))));
   });
   const end = e => {
-    if (!live) return;
+    if (!live || e.pointerId !== pid) return;
     live = false; sheet.style.transition = '';
     const speed = dy / Math.max(1, e.timeStamp - t0);                                   // px per ms
     if (dy > Math.min(150, sheet.offsetHeight * 0.3) || (speed > 0.55 && dy > 24)) close();
@@ -153,5 +157,5 @@ export function watchScroll() {
 // ---------- light and dark swap with a cross-fade where the browser can do it
 export function crossFade(change) {
   if (calm.matches || !document.startViewTransition || document.visibilityState !== 'visible') return change();
-  try { document.startViewTransition(change); } catch { change(); }
+  try { const vt = document.startViewTransition(change); if (vt && vt.ready) vt.ready.catch(() => {}); } catch { change(); }
 }

@@ -973,3 +973,7 @@ td.empty .mascot{display:flex;justify-content:center}
   .summary .mascot{width:var(--mw)}
   .brand-mark{width:36px;height:36px}
 }
+
+/* review fixes: the message pill sits above an open dialog; a closing dialog takes no more presses */
+#toast{z-index:30}
+.modal.out .sheet{pointer-events:none}
