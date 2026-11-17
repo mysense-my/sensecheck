@@ -41,6 +41,7 @@ const SEV = { Critical: 'bad', High: 'warn', Medium: 'mid', Low: 'info' };
 const LH = [['performance', 'Performance'], ['accessibility', 'Accessibility'], ['best-practices', 'Best practices'], ['seo', 'SEO']];
 const GROUPS = [['quick', 'Quick fixes'], ['revamp', 'Revamp items'], ['maintenance', 'Ongoing maintenance']];
 const sleep = ms => new Promise(r => setTimeout(r, ms));
+const weightText = k => (k ? (k < 103 ? `${Math.round(k)} KB` : `${(k / 1024).toFixed(1)} MB`) : '–'); // k is in KB
 const dotted = (t, text) => `<span class="imp"><i class="dot ${t}"></i>${text}</span>`;
 
 let toastT;
@@ -251,11 +252,12 @@ async function crawl(home, cap, skip, sitemap, ui) {
   notes.push(pages.length === 1 ? 'We checked the homepage.' : `We checked ${pages.length} pages: the homepage and the main pages around it.`);
   if (posts.size) notes.push(`We left out ${many(posts.size, 'blog post')}${sitemap.more ? ' (and likely more)' : ''}. Blog posts all share one layout, so opening every one would only repeat the same findings and keep you waiting.`);
   let skipped = posts.size + stopped;
-  for (const [k, s] of secs) {
-    if (!big(s)) continue;
-    skipped += Math.max(0, s.found - s.done);
-    notes.push(k === 'other' ? `${s.found} more pages aren’t linked from the homepage, so we checked ${s.done} of them as a sample.` : `The ${label(k)} has ${s.found} pages. We checked ${s.done} of them as a sample, because pages in the same section are usually built the same way.`);
-  }
+  const bigs = [...secs].filter(([, s]) => big(s)).sort((a, b) => b[1].found - a[1].found), named = bigs.filter(([k]) => k !== 'other'), loose = secs.get('other');
+  for (const [, s] of bigs) skipped += Math.max(0, s.found - s.done);
+  // On a huge site there can be a dozen big sections, so only the four biggest get their own line.
+  for (const [k, s] of named.slice(0, 4)) notes.push(`The ${label(k)} has ${s.found} pages. We checked ${s.done} of them as a sample, because pages in the same section are usually built the same way.`);
+  if (named.length > 4) notes.push(`${named.length - 4} other big ${named.length === 5 ? 'section was' : 'sections were'} sampled the same way.`);
+  if (big(loose)) notes.push(`${loose.found} more pages aren’t linked from the homepage, so we checked ${loose.done} of them as a sample.`);
   if (stopped && cap > 1) notes.push(`We stopped at ${pages.length} pages to keep the wait reasonable. About ${stopped} more were not checked.`);
   return { pages, broken, skipped, cover: notes };
 }
@@ -565,7 +567,7 @@ function renderResult() {
   const f = (m && m.field) || (d && d.field), fr = x => ({ FAST: 'good', AVERAGE: 'warn', SLOW: 'bad' }[x && x.rating] || 'info');
   const groups = [...new Set(r.stack.items.map(i => i.group))], looks = r.issues.filter(i => i.cat === 'Design');
   const val = (p, i) => (p ? dotted(tone(p.metrics[i].score), esc(p.metrics[i].display || '–')) : '–');
-  const kb = p => (p && p.weight ? (p.weight / 1024).toFixed(1) + ' MB' : '–');
+  const kb = p => weightText(p && p.weight);
   view.innerHTML = `
     <div class="top">
       <div class="crumb">Scans<i>&rsaquo;</i><b>${esc(r.domain)}</b></div>
@@ -764,7 +766,7 @@ function versus(r) {
 }
 const vsLine = (k, T = x => x) => `${T(CAT_NAME[k.cat])}: ${k.x} ${T('against')} ${k.y}`;
 function vsTable(r, T = x => x) {
-  const { a, b } = versus(r), kb = w => (w ? (w / 1024).toFixed(1) + ' MB' : '–'), sc = (s, t = tone) => (s == null ? '–' : dotted(t(s), s));
+  const { a, b } = versus(r), kb = weightText, sc = (s, t = tone) => (s == null ? '–' : dotted(t(s), s));
   const row = (label, x, y) => `<tr><td><b>${T(label)}</b></td><td>${x}</td><td>${y}</td></tr>`;
   return `<table class="mini vs"><thead><tr><th></th><th>${esc(a.domain)}</th><th>${esc(b.domain)}</th></tr></thead><tbody>
     ${row('Website health', sc(a.health.score, htone), sc(b.health.score, htone))}${row('Speed on phones', sc(a.perf.m), sc(b.perf.m))}${row('Speed on computers', sc(a.perf.d), sc(b.perf.d))}

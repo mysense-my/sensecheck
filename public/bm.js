@@ -294,6 +294,7 @@ const RULES = [
   [/^(\d+) more pages aren't linked from the homepage, so we checked (\d+) of them as a sample\.$/, '$1 halaman lagi tidak dipautkan dari laman utama, jadi kami semak $2 daripadanya sebagai sampel.'],
   [/^The "(.+)" section has (\d+) pages\. We checked (\d+) of them as a sample, because pages in the same section are usually built the same way\.$/, 'Bahagian “$1” mempunyai $2 halaman. Kami semak $3 daripadanya sebagai sampel, kerana halaman dalam bahagian yang sama biasanya dibina dengan cara yang sama.'],
   [/^The "(.+)" language version has (\d+) pages\. We checked (\d+) of them as a sample, because pages in the same section are usually built the same way\.$/, 'Versi bahasa “$1” mempunyai $2 halaman. Kami semak $3 daripadanya sebagai sampel, kerana halaman dalam bahagian yang sama biasanya dibina dengan cara yang sama.'],
+  [/^(\d+) other big sections? (?:was|were) sampled the same way\.$/, '$1 bahagian besar lain turut disemak secara sampel dengan cara yang sama.'],
   [/^We stopped at (\d+) pages to keep the wait reasonable\. About (\d+) more were not checked\.$/, 'Kami berhenti pada $1 halaman supaya tidak menunggu terlalu lama. Kira-kira $2 lagi tidak disemak.'],
   // strengths
   [/^Fast on mobile \((\d+) out of 100\)\.$/, 'Pantas di telefon ($1 daripada 100).'],
