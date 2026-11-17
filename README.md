@@ -12,8 +12,11 @@ Internal MYSense tool. Paste one website link and get a single report: what the 
    The **Design** section groups its advice by area (first impression, fonts and colours, photos, layout, trust, phones). Each item says what we saw, why it matters and what we would do. "Ideas worth pitching" lists things the site does not have yet (video, FAQ, map and so on); these never affect the score. The verdict comes from rules that catch a dated or broken look. Rules cannot judge taste, so have a designer look before pitching a redesign, or use the AI design opinion if it is switched on (see below).
    **How to make it faster** sits under the speed charts when the phone score is below 90. It lists up to five jobs, most useful first, picked from where the weight and the waiting actually go on that page, with what we would do and roughly how much time each could save.
    **Copy summary** gives a short message for WhatsApp or email, in English or Bahasa Malaysia, that you can edit before copying.
-   **Compare with a competitor** runs the same check on a competitor's link and puts the two side by side. The comparison is added to both PDFs.
-4. **Client PDF** is the version to share. **Internal PDF** adds the "Can we take it?" verdict, versions with confidence levels, our package names and the price guide. Do not send the internal one to clients. Both ask for an optional client name and your name for the cover page. The client PDF can be made in English or Bahasa Malaysia.
+   **Compare with a competitor** runs the same check on a competitor's link and puts the two side by side. The comparison is added to both reports.
+4. **Client report** is the version to share. **Internal report** adds the "Can we take it?" verdict, versions with confidence levels, our package names and the price guide. Do not send the internal one to clients. Both ask for an optional client name and your name for the cover. The client report can be made in English or Bahasa Malaysia.
+   Each report comes in three file types, picked in the same box: **PDF** (opens the print window, choose "Save as PDF"), **PowerPoint** (a slide deck that opens in PowerPoint, Keynote or Google Slides, where every piece can be edited) and **Web page** (one file that opens in any browser, phones included). Your last choice is remembered.
+   On a phone the menu stays at the top of the screen while you scroll, so you can jump between sections without going back up.
+   The mascot in the corner of a report gives the short version of the section you are reading and has a button to the next one. **Hide me** tucks it away; tap the part that still shows to bring it back.
 5. **History** lists your own past scans. Once personal logins are live they are saved under your email, so you see the same list on any computer, and nobody else sees yours. Scans are removed automatically after 24 hours. Use **Remove** to delete one sooner. A small copy of the website's screenshots is saved with each scan, so the real site still shows when you reopen it. Scanning the same site again shows the previous Health Score for a before-and-after.
 6. Admins get a **Show: Everyone's scans** switch on the History page, with a "Scanned by" column.
 
@@ -94,14 +97,17 @@ To switch it on: create an API key at console.anthropic.com (this is billed sepa
 - The logo mark is `public/img/logo.svg` (a purple rounded square with two dots and a tick smile). The same drawing is written inline in `index.html`, in `app.js` (`LOGO`) and on the login page in `src/worker.js`, so change all four together.
 - The mascot poses are `public/img/mascot/*.webp`: wave, point, inspect, underline, thumbs, clipboard, run, shrug, coffee. `mascot(pose, size)` in `app.js` places one. Its arms and legs are dark navy, so in dark mode it always stands on a light disc.
 - The login screen may only show `mysense-light.png`, `mysense-dark.png` and `mascot/wave.webp` without a passcode. Everything else stays locked.
+- "Round four" at the end of `public/app.css` holds the later additions: the file-type picker, the tech icons, the menu that stays at the top on phones, the float-in of the cards (`rise` keyframes, started by `floatIn()` in `app.js`; skipped for people who ask their device for less motion) and the mascot's reactions (the corner helper is `drawBuddy()` / `buddyLine()` in `app.js`).
 
 ## How it is put together
 
 - `public/` is the app (plain HTML, CSS and JS, no build step).
   - `analyze.js`: tech stack detection and PageSpeed parsing.
   - `audit.js`: page checks, issues and severities, Health Score, strengths, skills fit, next steps.
-  - `app.js`: scan flow, crawl, interface, charts, the competitor comparison, the copy summary and both PDF layouts.
-  - `bm.js`: Bahasa Malaysia wording for the client PDF and the copy summary.
+  - `app.js`: scan flow, crawl, interface, charts, the competitor comparison, the copy summary, the report layout (PDF and web page) and the corner helper.
+  - `slides.js`: the report as a PowerPoint deck. It is only loaded when someone picks PowerPoint, together with `vendor/pptxgen.bundle.js` (PptxGenJS 4.0.1, MIT licence, unchanged from the npm package).
+  - `techicons.js`: the brand icons shown in the tech stack. The shapes are from Simple Icons 16.30.0 (CC0). To add one, copy its path into `ICONS` and add a line to `RULES`. Names without an icon get a tile with their first letter.
+  - `bm.js`: Bahasa Malaysia wording for the client report and the copy summary.
   - `config.json`: the admin-editable rules above.
 - `src/worker.js` is the Cloudflare Worker. It serves `public/` and the API routes: `/api/fetch` (reads a public page), `/api/psi` (Google PageSpeed Insights) and `/api/design-review` (the optional AI design opinion).
 - `schema.sql` creates the saved-scans table.

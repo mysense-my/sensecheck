@@ -1,5 +1,6 @@
 import { tr } from './bm.js';
 import { detectStack, summarisePsi, diagnose, dnsClues, vulnsFor } from './analyze.js';
+import { techIcon } from './techicons.js';
 import { readPage, buildIssues, healthOf, strengthsOf, skillsFit, nextSteps, verdictOf, whyOf, ideasOf, speedPlan, designOf as designVerdict, norm, CATS, CAT_NAME } from './audit.js';
 
 const CFG = await fetch('config.json').then(r => r.json());
@@ -28,6 +29,7 @@ const I = {
   copy: '<rect x="8.5" y="8.5" width="11" height="11.5" rx="2.5"/><path d="M5 15.5V6.5A2.5 2.5 0 0 1 7.5 4H15"/>',
   versus: '<path d="M6.5 20V10M12 20V4M17.5 20v-7"/>',
   spark: '<path d="M12 4l1.9 5.1L19 11l-5.1 1.9L12 18l-1.9-5.1L5 11l5.1-1.9z"/>',
+  x: '<path d="M6.5 6.5l11 11M17.5 6.5l-11 11"/>',
 };
 const icon = n => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${I[n]}</svg>`;
 // The SenseCheck mascot. Poses: wave, point, inspect, underline, thumbs, clipboard, run, shrug, coffee.
@@ -47,7 +49,7 @@ const weightText = k => (k ? (k < 103 ? `${Math.round(k)} KB` : `${(k / 1024).to
 const dotted = (t, text) => `<span class="imp"><i class="dot ${t}"></i>${text}</span>`;
 
 let toastT;
-function toast(msg) { const t = $('#toast'); t.textContent = msg; t.classList.add('on'); clearTimeout(toastT); toastT = setTimeout(() => t.classList.remove('on'), 3800); }
+function toast(msg, pose) { const t = $('#toast'); t.innerHTML = (pose ? `<img src="img/mascot/${pose}.webp" alt="">` : '') + `<span>${esc(msg)}</span>`; t.classList.add('on'); clearTimeout(toastT); toastT = setTimeout(() => t.classList.remove('on'), 3800); }
 
 // ---------- history
 // With a personal login the scans are saved on the server under the signed-in email (H.server). Without one
@@ -442,6 +444,7 @@ function open(r) {
 function drawNav() {
   const res = S.route === 'result', none = !S.result;
   const b = (go, ic, label, on, dis) => `<button type="button" data-go="${go}" class="${on ? 'on' : ''}"${dis ? ' disabled' : ''}>${icon(ic)}${label}</button>`;
+  const keep = nav.scrollLeft;
   nav.innerHTML = b('new', 'plus', 'New scan', S.route === 'new' || S.route === 'scan')
     + b('overview', 'grid', 'Overview', res && S.sec === 'overview', none)
     + (S.result && S.result.vs ? b('compare', 'versus', 'Competitor', res && S.sec === 'compare') : '')
@@ -451,7 +454,12 @@ function drawNav() {
     + b('findings', 'list', 'Findings', res && S.sec === 'findings', none)
     + b('steps', 'flag', 'Next steps', res && S.sec === 'steps', none)
     + b('history', 'clock', 'History', S.route === 'history')
-    + '<hr>' + b('pdf-client', 'down', 'Client PDF', false, none) + b('pdf-internal', 'down', 'Internal PDF', false, none);
+    + '<hr>' + b('pdf-client', 'down', 'Client report', false, none) + b('pdf-internal', 'down', 'Internal report', false, none);
+  // On phones the menu is one row that scrolls sideways and stays at the top, so keep the current item in view.
+  nav.scrollLeft = keep;
+  const on = nav.querySelector('.on');
+  if (on && nav.scrollWidth > nav.clientWidth + 4) { const a = on.getBoundingClientRect(), n = nav.getBoundingClientRect(); nav.scrollTo({ left: nav.scrollLeft + a.left - n.left - (n.width - a.width) / 2, behavior: 'smooth' }); }
+  drawBuddy();
 }
 
 function historyCard(rows, title, everyone) {
@@ -462,7 +470,7 @@ function historyCard(rows, title, everyone) {
       <td class="nw">${dotted(htone(r.health.score), r.health.score ?? 'No data')}</td>
       <td class="nw">${dotted(r.verdict.tone, esc(r.verdict.label))}</td>
       <td class="nw">${dotted(r.fit.tone, r.fit.verdict)}</td>
-      <td>${esc(r.stack.platform ? r.stack.platform.name : 'Not detected')}</td>${everyone ? `<td>${esc(r.by || '')}</td>` : ''}
+      <td><span class="plat">${techIcon(r.stack.platform ? r.stack.platform.name : 'Not detected', 'Platform')}${esc(r.stack.platform ? r.stack.platform.name : 'Not detected')}</span></td>${everyone ? `<td>${esc(r.by || '')}</td>` : ''}
       <td class="nw muted">${fmt(r.date)}</td>
       <td class="nw"><button type="button" class="link" data-open="${r.id}">Open</button><button type="button" class="link" data-remove="${r.id}">Remove</button></td></tr>`).join('')}
     </tbody></table></div><p class="keep">Scans are removed automatically after ${KEEP_HOURS} hours.</p></div>`;
@@ -482,7 +490,8 @@ function renderNew() {
       <div class="covers"><span><i class="dot m"></i>Tech stack and versions</span><span><i class="dot d"></i>Speed, SEO, content and security</span><span><i class="dot c3"></i>Strengths and next steps</span></div>
     </div>${mascot('wave', 'xl', 'blob')}</div>
     ${rows.length ? historyCard(rows, H.server ? 'My recent scans' : 'Recent scans') : ''}`;
-  const u = $('#u'); if (u && window.matchMedia('(min-width: 821px)').matches) u.focus();
+  const u = $('#u'); if (u && window.matchMedia('(min-width: 821px)').matches) u.focus({ preventScroll: true });
+  floatIn();
 }
 
 function renderHistory() {
@@ -490,6 +499,7 @@ function renderHistory() {
   view.innerHTML = `<div class="top"><div class="crumb">SenseCheck<i>&rsaquo;</i><b>History</b></div></div>
     ${rows.length || ME.admin ? historyCard(rows, all ? 'Everyone\u2019s scans' : H.server ? 'My scans' : 'Past scans on this browser', all) : ''}
     ${rows.length ? '' : `<div class="card emptybox">${mascot('coffee', 'lg', 'blob')}<p class="empty">No scans yet. Run your first check from New scan.</p></div>`}`;
+  floatIn();
 }
 
 function renderScan(domain, vsFor) {
@@ -498,8 +508,9 @@ function renderScan(domain, vsFor) {
     <div class="card start hasbuddy"><div class="start-main"><h1>Checking ${esc(domain)}</h1>
     <p>${vsFor ? `This is the competitor for ${esc(vsFor.domain)}. ` : ''}We check the homepage and the main pages around it, two at a time so we don\u2019t slow the website down. Blog posts are left out because they all share one layout. Keep this tab open until it finishes.</p>
     <div class="steps">${[['site', 'Reading the site'], ['stack', 'Identifying the tech stack'], ['pages', 'Checking pages'], ['m', 'Measuring mobile speed'], ['d', 'Measuring desktop speed']].map(([id, t]) => `<div class="step" id="st-${id}"><span class="ic"></span><span>${t}</span><small></small></div>`).join('')}</div>
-    <div class="prog" id="prog" hidden><div class="bar"><i id="progbar"></i></div><p id="progtext"></p><div id="progask"></div></div>
+    <div class="prog" id="prog" hidden><div class="track"><div class="bar"><i id="progbar"></i></div><img class="runner" id="runner" src="img/mascot/run.webp" alt=""></div><p id="progtext"></p><div id="progask"></div></div>
     <div class="sofar" id="sofar" hidden></div></div>${mascot('inspect', 'xl', 'blob')}</div>`;
+  floatIn();
 }
 
 // Early results, shown while the rest of the scan is still running, so nobody stares at a blank screen.
@@ -511,7 +522,7 @@ function sofar(patch) {
   const sp = v => (v != null ? `${v} out of 100` : 'Measuring\u2026');
   el.hidden = false;
   el.innerHTML = `<h3>What we know so far</h3><div class="tiles">
-    ${tile('Built with', t.stack != null ? esc(t.stack || 'Not clear yet') : 'Checking\u2026')}
+    ${tile('Built with', t.stack != null ? (t.stack ? techIcon(t.stack, 'Platform') : '') + esc(t.stack || 'Not clear yet') : 'Checking\u2026')}
     ${tile('Speed on phones', sp(t.mobile), t.mobile != null ? tone(t.mobile) : '')}
     ${tile('Speed on computers', sp(t.desktop), t.desktop != null ? tone(t.desktop) : '')}</div>
     ${t.first && t.first.length ? `<span class="label">First things we noticed on the homepage</span><ul>${t.first.map(x => `<li>${esc(x)}</li>`).join('')}</ul>` : ''}
@@ -525,7 +536,9 @@ function progressUi() {
     progress({ done, total, more, eta, posts }) {
       const box = $('#prog'); if (!box) return;
       box.hidden = total <= 1;
-      $('#progbar').style.width = Math.min(100, Math.round(done / Math.max(1, total) * 100)) + '%';
+      const pct = Math.min(100, Math.round(done / Math.max(1, total) * 100));
+      $('#progbar').style.width = pct + '%';
+      const run = $('#runner'); if (run) run.style.left = `clamp(16px, ${pct}%, calc(100% - 16px))`; // the mascot jogs along the bar
       const size = total >= 100 ? `This is a big website, around ${total}${more ? '+' : ''} pages to check, so it needs a little time.` : `There are around ${total} pages to check.`;
       $('#progtext').innerHTML = `<b>${done} of ${total}${more ? '+' : ''} pages checked.</b> ${done < total ? `${told ? '' : size + ' '}${esc(mins(eta).replace(/^a/, 'A'))} left.` : more ? '' : 'Finishing up.'}${posts ? ` <span class="muted">Leaving out ${posts} blog ${posts === 1 ? 'post' : 'posts'}, they all share one layout.</span>` : ''}`;
       if (done > 2) told = true;
@@ -546,6 +559,13 @@ function step(id, st, note) {
   el.className = 'step ' + st;
   el.querySelector('.ic').textContent = st === 'done' ? '\u2713' : st === 'fail' ? '!' : '';
   if (note != null) el.querySelector('small').textContent = note;
+  // the mascot on the scan screen changes with the job in hand
+  const pose = st === 'run' ? { site: 'inspect', stack: 'clipboard', pages: 'run' }[id] : id === 'pages' ? 'coffee' : '';
+  if (pose) scanPose(pose);
+}
+function scanPose(pose) {
+  const im = $('.start > .mascot img'); if (!im || im.dataset.pose === pose) return;
+  im.dataset.pose = pose; im.src = `img/mascot/${pose}.webp`; boing(im.parentNode);
 }
 function renderFail(domain, d) {
   S.route = 'new'; drawNav();
@@ -553,6 +573,7 @@ function renderFail(domain, d) {
     <div class="card start hasbuddy"><div class="start-main"><h1>Could not check ${esc(domain)}</h1>
     <p><b>${esc(d.title)}.</b> ${esc(d.why)}</p><p style="margin-top:12px"><b>What to do:</b> ${esc(d.next)}</p>
     <div class="urlrow"><button class="btn primary" type="button" data-go="new">Try another link</button></div></div>${mascot('shrug', 'xl', 'blob')}</div>`;
+  floatIn();
 }
 
 // Notice shown when the site was blocked or only partly readable, with the specific reason.
@@ -607,8 +628,8 @@ function renderResult() {
         ${sh.d || sh.m ? `<div class="shots">${sh.d ? `<img src="${esc(sh.d)}" alt="Desktop screenshot of ${esc(r.domain)}">` : ''}${sh.m ? `<img src="${esc(sh.m)}" alt="Mobile screenshot of ${esc(r.domain)}">` : ''}</div>` : `<div class="shot empty">${esc(r.domain[0].toUpperCase())}</div>`}
         <h2>${esc(r.domain)}</h2>
         <p class="tone ${r.verdict.tone}">${esc(r.verdict.label)}</p>
-        <button class="btn primary" type="button" data-go="pdf-client">${icon('down')}Client PDF</button>
-        <button class="btn soft" type="button" data-go="pdf-internal">Internal PDF</button>
+        <button class="btn primary" type="button" data-go="pdf-client">${icon('down')}Client report</button>
+        <button class="btn soft" type="button" data-go="pdf-internal">Internal report</button>
         <button class="btn soft" type="button" data-act="summary">${icon('copy')}Copy summary</button>
         <button class="btn soft" type="button" data-act="rival">${icon('versus')}${r.vs ? 'Change competitor' : 'Compare with a competitor'}</button>
       </div>
@@ -650,7 +671,7 @@ function renderResult() {
         ${fasterHtml(r)}` : `<p class="note">No speed data. ${esc(perr)}</p>`}
     </div>
 
-    <div class="card" id="sec-design">
+    <div class="card peek" id="sec-design">${mascot('inspect', 'sm')}
       <div class="card-head"><h3>${hd('layout', 'pink')}Design</h3><span class="muted">What looks dated or broken, and what would lift it</span></div>
       <div class="stack">
         <div><span class="label">Verdict</span><h4>${dotted(dz.tone, esc(dz.label))}</h4><p class="ink2" style="margin-top:10px">${esc(dz.note)}</p>
@@ -670,7 +691,7 @@ function renderResult() {
           <span class="label sub">What this means for the client</span><h4>${dotted(v.tone, esc(v.title))}</h4>${reasons(v.reasons)}
           ${r.stack.tried ? `<span class="label sub">How we checked</span>${reasons(r.stack.tried)}` : ''}
         </div>
-        <div class="tech">${groups.map(g => `<div class="g"><span>${g}</span><span>Confidence</span></div>` + r.stack.items.filter(i => i.group === g).map(i => `<div class="t"><i class="dot ${i.status}"></i><span>${esc(i.name)}${i.version ? ` <code>${esc(i.version)}</code>` : ''}</span><small>${esc(i.note)}</small><em>${i.conf}</em></div>`).join('')).join('')}</div>
+        <div class="tech">${groups.map(g => `<div class="g"><span>${g}</span><span>Confidence</span></div>` + r.stack.items.filter(i => i.group === g).map(i => `<div class="t">${techIcon(i.name, i.group)}<span>${esc(i.name)}${i.version ? ` <code>${esc(i.version)}</code>` : ''}</span><small>${i.note || i.status !== 'info' ? `<i class="dot ${i.status}"></i>` : ''}${esc(i.note)}</small><em>${i.conf}</em></div>`).join('')).join('')}</div>
       </div>
     </div>
 
@@ -689,7 +710,7 @@ function renderResult() {
       <button type="button" class="link more" id="more" hidden></button>
     </div>
 
-    <div class="card" id="sec-steps">
+    <div class="card peek" id="sec-steps">${mascot('run', 'sm')}
       <div class="card-head"><h3>${hd('flag', 'purple')}Recommended next steps</h3><span class="muted">Each one maps to a service package</span></div>
       <div class="steps3">${stepsHtml(r, true)}</div>
       ${budgetHtml(r)}
@@ -697,6 +718,7 @@ function renderResult() {
   if (any) { drawChart($('#chart-scores'), scoreGroups(m, d), { labels: true, bw: 22 }); drawChart($('#chart-speed'), speedGroups(m, d)); }
   if (r.vs) drawChart($('#chart-vs'), vsGroups(r), VS_CHART);
   drawRows();
+  floatIn();
 }
 
 function drawRows() {
@@ -704,7 +726,7 @@ function drawRows() {
   const list = S.result.issues.filter(f => (S.cat === 'all' || f.cat === S.cat) && (!q || (f.title + ' ' + f.detail + ' ' + f.fix).toLowerCase().includes(q)));
   const shown = S.more ? list : list.slice(0, 8);
   $('#rows').innerHTML = shown.map(f => `<tr><td><b>${esc(f.title)}</b><span class="d">${esc(f.detail)}</span></td><td>${CAT_NAME[f.cat]}</td><td class="nw">${dotted(SEV[f.sev], f.sev)}</td><td>${esc(f.where)}</td><td>${esc(f.fix)}</td></tr>`).join('')
-    || `<tr><td colspan="5" class="empty">${S.result.issues.length ? 'Nothing matches that filter.' : 'No issues found on the things we can measure.'}</td></tr>`;
+    || `<tr><td colspan="5" class="empty">${S.result.issues.length ? `${mascot('shrug', 'sm')}Nothing matches that filter.` : `${mascot('thumbs', 'sm')}No issues found on the things we can measure.`}</td></tr>`;
   $('#count').textContent = `${list.length} ${list.length === 1 ? 'item' : 'items'}`;
   const more = $('#more'); more.hidden = list.length <= 8; more.textContent = S.more ? 'View less' : `View more (${list.length - 8})`;
 }
@@ -832,7 +854,7 @@ function summaryText(r, lang) {
   return L.join('\n');
 }
 function summaryDialog(lang) {
-  openModal(`<h3>Summary to send</h3><p>A short message for WhatsApp or email. Change anything you like, then copy it.</p>
+  openModal(`${mascot('wave', 'sm', 'sheet-buddy')}<h3>Summary to send</h3><p>A short message for WhatsApp or email. Change anything you like, then copy it.</p>
     <div class="seg"><button type="button" data-act="sum-en" class="${lang === 'en' ? 'on' : ''}">English</button><button type="button" data-act="sum-bm" class="${lang === 'bm' ? 'on' : ''}">Bahasa Malaysia</button></div>
     <textarea id="sum-text" rows="15" spellcheck="false">${esc(summaryText(S.result, lang))}</textarea>
     <div class="sheet-foot"><button class="btn soft" type="button" data-act="close">Close</button><button class="btn primary" type="button" data-act="sum-copy">${icon('copy')}Copy</button></div>`);
@@ -840,7 +862,7 @@ function summaryDialog(lang) {
 async function copyText(text) {
   try { await navigator.clipboard.writeText(text); }
   catch { const t = $('#sum-text'); if (t) { t.select(); document.execCommand('copy'); } }
-  closeModal(); toast('Copied. Paste it into WhatsApp or email.');
+  closeModal(); toast('Copied. Paste it into WhatsApp or email.', 'thumbs');
 }
 
 // ---------- AI design opinion (optional: only shown when the Worker has a Claude API key)
@@ -892,16 +914,24 @@ async function aiReview() {
   if (S.result === r && $('#ai')) $('#ai').innerHTML = aiHtml(r);
 }
 
-// ---------- PDF options: who it is for, who prepared it, and the language of the client version
+// ---------- report options: who it is for, who prepared it, the language of the client version, and the file type
+// Each file type: [name, what it is, button text].
+const FORMATS = {
+  pdf: ['PDF', 'Opens the print window. Choose \u201cSave as PDF\u201d there.', 'Create PDF'],
+  pptx: ['PowerPoint', 'A slide deck you can open in PowerPoint, Keynote or Google Slides, then edit and present.', 'Download slides'],
+  html: ['Web page', 'One file that opens in any browser, on a phone too. Easy to attach to an email.', 'Download web page'],
+};
 function pdfDialog(mode) {
   if (!S.result) return;
-  let by = ''; try { by = localStorage.getItem('sensecheck.by') || ''; } catch { /* storage unavailable */ }
-  openModal(`<h3>${mode === 'internal' ? 'Internal PDF' : 'Client PDF'}</h3><p>${mode === 'internal' ? 'For our own team. It includes versions, the skills check and service packages, so don’t send it to the client.' : 'Safe to send to the client.'} The names are optional and go on the cover page.</p>
+  let by = '', fmt = 'pdf'; try { by = localStorage.getItem('sensecheck.by') || ''; fmt = localStorage.getItem('sensecheck.fmt') || 'pdf'; } catch { /* storage unavailable */ }
+  if (!FORMATS[fmt]) fmt = 'pdf';
+  openModal(`${mascot('clipboard', 'sm', 'sheet-buddy')}<h3>${mode === 'internal' ? 'Internal report' : 'Client report'}</h3><p>${mode === 'internal' ? 'For our own team. It includes versions, the skills check and service packages, so don\u2019t send it to the client.' : 'Safe to send to the client.'} The names are optional and go on the cover.</p>
     <form id="pdf-f" data-mode="${mode}" novalidate>
       <label class="lab">Prepared for<input id="pdf-for" type="text" placeholder="Client or company name" autocomplete="off" value="${esc(S.result.clientName || '')}"></label>
       <label class="lab">Prepared by<input id="pdf-by" type="text" placeholder="Your name" autocomplete="off" value="${esc(by)}"></label>
       ${mode === 'client' ? '<label class="lab">Language<select id="pdf-lang"><option value="en">English</option><option value="bm">Bahasa Malaysia</option></select></label>' : ''}
-      <div class="sheet-foot"><button class="btn soft" type="button" data-act="close">Cancel</button><button class="btn primary" type="submit">${icon('down')}Create PDF</button></div></form>`);
+      <div class="pickrow"><span>File type</span><div class="seg pick" role="radiogroup" aria-label="File type">${Object.entries(FORMATS).map(([k, x]) => `<label><input type="radio" name="fmt" value="${k}"${k === fmt ? ' checked' : ''}>${x[0]}</label>`).join('')}</div><p id="fmt-hint">${FORMATS[fmt][1]}</p></div>
+      <div class="sheet-foot"><button class="btn soft" type="button" data-act="close">Cancel</button><button class="btn primary" type="submit" id="fmt-go">${icon('down')}${FORMATS[fmt][2]}</button></div></form>`);
 }
 
 // ---------- PDF report (print layout). mode: 'client' to share, 'internal' adds skills fit, versions and packages.
@@ -991,7 +1021,7 @@ function buildReport(mode, o = {}) {
     <div class="rp-box" style="margin-top:8pt"><h3>${esc(T(v.title))}</h3>${reasons(v.reasons.map(T))}</div>
     ${int && r.stack.tried ? `<p class="rp-cap" style="margin-top:8pt">How we checked</p>${reasons(r.stack.tried)}` : ''}
     ${int && r.stack.items.length ? `<table style="margin-top:10pt"><thead><tr><th>Component</th><th>Type</th><th>Version</th><th>Status</th><th>Confidence</th></tr></thead><tbody>
-      ${r.stack.items.map(i => `<tr><td><b>${esc(i.name)}</b></td><td>${i.group}</td><td>${esc(i.version || '–')}</td><td>${i.note ? dotted(i.status, esc(i.note)) : ''}</td><td>${i.conf}</td></tr>`).join('')}</tbody></table>` : ''}
+      ${r.stack.items.map(i => `<tr><td><span class="plat">${techIcon(i.name, i.group)}<b>${esc(i.name)}</b></span></td><td>${i.group}</td><td>${esc(i.version || '–')}</td><td>${i.note ? dotted(i.status, esc(i.note)) : ''}</td><td>${i.conf}</td></tr>`).join('')}</tbody></table>` : ''}
 
     <h2>${W('Recommended next steps', 'Langkah seterusnya yang disyorkan')}</h2>
     <div class="rp-cols">${stepsHtml(r, int, T, groupNames)}</div>
@@ -1006,6 +1036,67 @@ function printReport(mode, o = {}) {
   const theme = document.documentElement.dataset.theme || 'light';
   document.documentElement.dataset.theme = 'light'; // PDFs always print light
   Promise.all([...document.querySelectorAll('#report img')].map(i => (i.decode ? i.decode().catch(() => {}) : 0))).then(() => { window.print(); setTimeout(() => { document.title = 'SenseCheck'; document.documentElement.dataset.theme = theme; }, 500); });
+}
+
+// ---------- the same report as a web page or as slides
+const fileName = (mode, o, ext) => `SenseCheck ${mode === 'internal' ? 'Internal Audit' : o.lang === 'bm' ? 'Laporan' : 'Report'} - ${S.result.domain}.${ext}`;
+function download(blob, name) {
+  const a = Object.assign(document.createElement('a'), { href: URL.createObjectURL(blob), download: name });
+  document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+}
+const asData = src => fetch(src).then(x => x.blob()).then(b => new Promise((ok, no) => { const fr = new FileReader(); fr.onload = () => ok(fr.result); fr.onerror = no; fr.readAsDataURL(b); }));
+// Extra styles for the web page: the report sits on a sheet in the middle of the screen and reflows on a phone.
+// Printing the page from the browser still gives the normal PDF layout.
+const PAGE_CSS = `@media screen{
+  html,body.page{background:#ECEAE4}
+  body.page{margin:0;padding:28px 14px 40px}
+  body.page #report{max-width:190mm;margin:0 auto;padding:13mm 14mm 14mm;background:#fff;border-radius:22px;box-shadow:0 0 0 1px #E8E5DD,0 40px 90px -60px rgba(50,40,20,.45);font-size:15px}
+  body.page .rp-cover{padding:4mm 0 12mm;margin-bottom:12mm;border-bottom:1px solid #E4E4EC}
+  body.page .rp-cover-logo{margin-top:9mm}
+  body.page .rp-kicker{margin-top:10mm}
+  body.page .rp-score{margin-top:9mm}
+  body.page #report table.rp-meta{margin-top:9mm}
+  body.page .tablewrap{overflow-x:auto}
+}
+@media screen and (max-width:720px){
+  body.page{padding:0}
+  body.page #report{padding:22px 16px 28px;border-radius:0;box-shadow:none}
+  body.page #report h1{font-size:26px}
+  body.page #report .rp-cover h1{font-size:32px}
+  body.page .rp-score{flex-direction:column;align-items:flex-start;gap:10px}
+  body.page .rp-top{flex-direction:column}
+  body.page .rp-top .shots{max-width:100%}
+  body.page .rp-top img{height:150px}
+  body.page .rp-top .scores{width:100%}
+  body.page .rp-cols,body.page .rp-cols.two,body.page .rp-charts{grid-template-columns:minmax(0,1fr)}
+  body.page #report .rp-good{columns:1}
+  body.page #report table:not(.rp-meta){display:block;overflow-x:auto}
+  body.page #report td,body.page #report th{min-width:84px}
+}`;
+async function saveHtml(mode, o = {}) {
+  if (!S.result) return;
+  try {
+    buildReport(mode, o);
+    const box = $('#report').cloneNode(true);
+    // pictures are packed into the file, so it still works when it is opened somewhere else
+    await Promise.all([...box.querySelectorAll('img')].map(async im => { const src = im.getAttribute('src') || ''; if (src && !src.startsWith('data:')) im.setAttribute('src', await asData(src).catch(() => '')); }));
+    const css = (await fetch('app.css').then(x => x.text())).replace(/@media print\s*\{/g, '@media all{');
+    const name = fileName(mode, o, 'html');
+    const page = `<!doctype html>\n<html lang="${mode !== 'internal' && o.lang === 'bm' ? 'ms' : 'en'}">\n<head>\n<meta charset="utf-8">\n<meta name="viewport" content="width=device-width,initial-scale=1">\n<meta name="robots" content="noindex,nofollow">\n<title>${esc(name.replace(/\.html$/, ''))}</title>\n<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600&display=swap" rel="stylesheet">\n<style>${css}\n${PAGE_CSS}</style>\n</head>\n<body class="page">\n<div id="report">${box.innerHTML}</div>\n</body>\n</html>\n`;
+    download(new Blob([page], { type: 'text/html' }), name);
+    toast('Web page downloaded. Open it in any browser.', 'thumbs');
+  } catch { toast('The web page could not be made. Try the PDF.', 'shrug'); }
+}
+// The slides are built by slides.js, which is only loaded when someone asks for them.
+async function saveSlides(mode, o = {}) {
+  if (!S.result) return;
+  toast('Building the slides. This takes a few seconds.', 'run');
+  try {
+    const { makeSlides } = await import('./slides.js');
+    const blob = await makeSlides(S.result, mode, o, { shots: shotsOf(S.result), versus, areaOf, AREAS, priceOf, designOf, good, CFG });
+    download(blob, fileName(mode, o, 'pptx'));
+    toast('Slides downloaded.', 'thumbs');
+  } catch (e) { console.error(e); toast('The slides could not be made. Try the PDF.', 'shrug'); }
 }
 
 // ---------- routing and events
@@ -1031,7 +1122,8 @@ function go(to) {
   if (!S.result) return;
   const was = S.route; S.route = 'result'; S.sec = to; spyHold = Date.now() + 900;
   if (was !== 'result') render(); else drawNav();
-  const el = $('#sec-' + to); if (el) el.scrollIntoView({ behavior: 'smooth', block: to === 'overview' ? 'center' : 'start' });
+  const el = $('#sec-' + to);
+  if (el) { view.querySelectorAll('.rise:not(.rise-go)').forEach(x => x.classList.add('rise-flat')); el.scrollIntoView({ behavior: 'smooth', block: to === 'overview' ? 'center' : 'start' }); }
 }
 
 // The menu follows the page (it is sticky in the styles) and marks the section you are reading.
@@ -1049,6 +1141,10 @@ function spy() {
 window.addEventListener('scroll', () => { if (!spyWait) spyWait = setTimeout(spy, 70); }, { passive: true });
 
 document.addEventListener('click', e => {
+  const bud = e.target.closest('[data-buddy]');
+  if (bud) return buddyAct(bud.dataset.buddy);
+  const pet = e.target.closest('.mascot');
+  if (pet) return pat(pet);
   const t = e.target.closest('[data-go],[data-open],[data-remove],[data-rescan],[data-act],#more');
   if (!t) return;
   if (t.dataset.act) return act(t.dataset.act);
@@ -1066,13 +1162,17 @@ document.addEventListener('submit', e => {
     const o = { client: $('#pdf-for').value.trim(), by: $('#pdf-by').value.trim(), lang: ($('#pdf-lang') || {}).value || 'en' }, mode = e.target.dataset.mode;
     try { localStorage.setItem('sensecheck.by', o.by); } catch { /* storage unavailable */ }
     S.result.clientName = o.client;
-    closeModal(); printReport(mode, o);
+    const fmt = (e.target.querySelector('input[name="fmt"]:checked') || {}).value || 'pdf';
+    try { localStorage.setItem('sensecheck.fmt', fmt); } catch { /* storage unavailable */ }
+    closeModal();
+    if (fmt === 'html') saveHtml(mode, o); else if (fmt === 'pptx') saveSlides(mode, o); else printReport(mode, o);
   }
 });
 document.addEventListener('change', e => {
   if (e.target.id === 'cat') { S.cat = e.target.value; S.more = false; drawRows(); }
   if (e.target.id === 'max') S.max = +e.target.value;
   if (e.target.id === 'who') { S.who = e.target.value; render(); }
+  if (e.target.name === 'fmt' && FORMATS[e.target.value]) { $('#fmt-hint').textContent = FORMATS[e.target.value][1]; $('#fmt-go').lastChild.textContent = FORMATS[e.target.value][2]; }
   if (e.target.id === 'devuser' && ME.local) fetch('/api/dev-login?as=' + encodeURIComponent(e.target.value), { method: 'POST' }).then(() => location.reload());
 });
 document.addEventListener('input', e => { if (e.target.id === 'q') { S.q = e.target.value; drawRows(); } });
@@ -1087,6 +1187,115 @@ function setTheme(t) {
 }
 setTheme(document.documentElement.dataset.theme === 'dark' ? 'dark' : 'light');
 themeBtn.addEventListener('click', () => setTheme(document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark'));
+
+// ---------- cards float up into place
+// Each card waits a little lower and smaller, then rises, pops just past its spot and settles, like something
+// coming up to the surface of water. It plays once, the first time the card comes into view. People who ask
+// their device for less motion get the cards without it.
+const calm = window.matchMedia('(prefers-reduced-motion: reduce)');
+const riser = 'IntersectionObserver' in window ? new IntersectionObserver(list => {
+  const up = list.filter(e => e.isIntersecting).sort((a, b) => a.boundingClientRect.top - b.boundingClientRect.top || a.boundingClientRect.left - b.boundingClientRect.left);
+  up.forEach((e, i) => {
+    const el = e.target; riser.unobserve(el);
+    el.style.setProperty('--rise-wait', `${Math.min(i, 6) * 90}ms`); // cards that arrive together come up one after another
+    el.classList.add('rise-go');
+    el.addEventListener('animationend', function done(ev) {
+      if (ev.target !== el || ev.pseudoElement) return;
+      el.removeEventListener('animationend', done); el.classList.remove('rise', 'rise-go', 'rise-flat'); el.style.removeProperty('--rise-wait');
+    });
+  });
+}, { rootMargin: '0px 0px -4% 0px' }) : null;
+function floatIn() {
+  if (!riser || calm.matches) return;
+  const els = [...view.querySelectorAll('.card:not(.hero3), .hero3 > .col, .hero3 > .summary')];
+  els.forEach(el => el.classList.add('rise'));
+  // wait for the intro to start leaving, so the first cards are not played behind it
+  const start = () => { const intro = $('#intro'); if (intro && !intro.classList.contains('out')) return setTimeout(start, 120); els.forEach(el => el.isConnected && riser.observe(el)); };
+  start();
+}
+
+// ---------- the mascot reacts
+// A tap makes any mascot hop. The big one on the start screen also changes pose each time.
+function boing(el) { if (!el) return; el.classList.remove('boing'); void el.offsetWidth; el.classList.add('boing'); }
+document.addEventListener('animationend', e => { if (e.animationName === 'boing') e.target.classList.remove('boing'); });
+const PETS = ['wave', 'thumbs', 'coffee', 'clipboard', 'inspect'];
+function pat(el) {
+  if (el.classList.contains('pen')) return; // this one is holding the underline in place
+  boing(el);
+  if (S.route === 'new' && el.closest('.start')) { const im = el.querySelector('img'), i = (PETS.indexOf(im.dataset.pose || 'wave') + 1) % PETS.length; im.dataset.pose = PETS[i]; im.src = `img/mascot/${PETS[i]}.webp`; }
+}
+
+// ---------- the helper in the corner of a report
+// The mascot waits in the corner, changes pose with the section being read, and hops when the section changes.
+// A tap gives the short version of that section and a button to the next one. "Hide me" tucks it away at the
+// bottom edge (remembered in this browser); a tap on the part that still shows brings it back.
+const BUDDY_ORDER = ['overview', 'compare', 'speed', 'design', 'stack', 'findings', 'steps'];
+const SEC_NAME = { overview: 'Overview', compare: 'Competitor', speed: 'Page speed', design: 'Design', stack: 'Tech stack', findings: 'Findings', steps: 'Next steps' };
+const narrow = window.matchMedia('(max-width: 820px)');
+const buddy = document.body.appendChild(Object.assign(document.createElement('div'), { id: 'buddy', className: 'buddy', hidden: true }));
+buddy.innerHTML = `<div class="buddy-say" role="status" hidden><button type="button" class="buddy-x" data-buddy="shut" aria-label="Close">${icon('x')}</button><p></p><div class="buddy-acts"></div></div>
+  <button type="button" class="buddy-face" data-buddy="face" aria-label="SenseCheck helper. Tap for the short version of this section."><img src="img/mascot/wave.webp" alt="" data-pose="wave"></button>`;
+const BUD = { sec: '', id: null, open: false, away: false, hello: false, t: 0 };
+// On a phone it starts tucked away, so it never sits on top of the text unless someone asks for it.
+try { const kept = localStorage.getItem('sensecheck.buddy'); BUD.away = kept ? kept === 'away' : narrow.matches; } catch { BUD.away = narrow.matches; }
+const many = (n, w) => `${n} ${w}${n === 1 ? '' : 's'}`;
+// [pose, what the helper says] for a section of the report
+function buddyLine(sec, r) {
+  const h = r.health, m = good(r.psi.mobile), d = good(r.psi.desktop);
+  if (sec === 'compare' && r.vs) {
+    const a = h.score, b = r.vs.health.score;
+    return ['shrug', a == null || b == null ? `Here is ${r.domain} next to ${r.vs.domain}.` : `${r.domain} scores ${a} and ${r.vs.domain} scores ${b}. ${Math.abs(a - b) < 5 ? 'That\u2019s about level.' : a > b ? 'Our client is ahead.' : 'The competitor is ahead, which is a good reason to act.'}`];
+  }
+  if (sec === 'speed') {
+    const f = speedPlan(r), ps = m ? m.scores.performance : null, ds = d ? d.scores.performance : null;
+    if (ps == null && ds == null) return ['run', 'Google couldn\u2019t test the speed this time. Try the scan again later.'];
+    return ['run', `${ps != null ? `Phones score ${ps} out of 100${ds != null ? `, computers ${ds}` : ''}` : `Computers score ${ds} out of 100`}. ${f && f.steps.length ? `The biggest win is \u201c${f.steps[0].title}\u201d.` : 'Speed is in good shape.'}`];
+  }
+  if (sec === 'design') { const dz = designOf(r), k = r.issues.filter(i => i.cat === 'Design').length; return ['inspect', `${dz.label}. ${k ? `${many(k, 'design point')} below, grouped by area.` : 'Nothing dated or broken turned up.'}`]; }
+  if (sec === 'stack') {
+    const p = r.stack.platform, name = p && p.name !== 'Not detected' ? p.name : '';
+    return ['clipboard', name ? `Built with ${name}${r.stack.wp && r.stack.wp.version ? ` ${r.stack.wp.version}` : ''}. Can we take it? ${r.fit.verdict}.` : 'We couldn\u2019t tell what it\u2019s built with. Ask the client before quoting.'];
+  }
+  if (sec === 'findings') { const n = r.issues.length, big = r.issues.filter(i => i.sev === 'Critical' || i.sev === 'High').length; return ['coffee', n ? `${many(n, 'finding')}, ${big ? `${big} of them serious` : 'none of them serious'}. Use the search box to jump to one.` : 'No issues on the things we can measure.']; }
+  if (sec === 'steps') return ['thumbs', 'That\u2019s the full check. Download the report when you\u2019re ready.'];
+  return ['wave', h.score == null ? `We could only partly check ${r.domain}.` : `${r.domain} scores ${h.score} out of 100. ${r.verdict.label}.`];
+}
+const buddyNext = () => { const order = BUDDY_ORDER.filter(k => k !== 'compare' || (S.result && S.result.vs)); return order[order.indexOf(BUD.sec) + 1]; };
+function paintBuddy(hop) {
+  const r = S.result; if (!r) return;
+  const [pose, text] = buddyLine(BUD.sec, r), say = $('.buddy-say', buddy), face = $('.buddy-face', buddy), im = $('img', face), next = buddyNext();
+  if (im.dataset.pose !== pose) { im.dataset.pose = pose; im.src = `img/mascot/${pose}.webp`; }
+  if (hop) boing(face);
+  buddy.classList.toggle('away', BUD.away);
+  say.hidden = !BUD.open || BUD.away;
+  $('p', say).textContent = text + (BUD.hello && BUD.sec === 'overview' ? ' Tap me on any section for the short version.' : '');
+  $('.buddy-acts', say).innerHTML = (next ? `<button type="button" class="btn primary" data-buddy="next">Next: ${SEC_NAME[next]}</button>` : `<button type="button" class="btn primary" data-buddy="report">${icon('down')}Client report</button>`) + '<button type="button" class="link" data-buddy="away">Hide me</button>';
+}
+function drawBuddy() {
+  const show = S.route === 'result' && !!S.result;
+  buddy.hidden = !show;
+  if (!show) { BUD.sec = ''; BUD.id = null; clearTimeout(BUD.t); return; }
+  const r = S.result, sec = BUDDY_ORDER.includes(S.sec) && (S.sec !== 'compare' || r.vs) ? S.sec : 'overview', fresh = BUD.id !== r.id;
+  if (!fresh && sec === BUD.sec) return;
+  if (fresh) {
+    // a new report: say hello once, then step back unless someone taps
+    BUD.id = r.id; BUD.hello = true; BUD.open = !BUD.away && !narrow.matches;
+    clearTimeout(BUD.t); if (BUD.open) BUD.t = setTimeout(() => { if (BUD.hello) { BUD.hello = false; BUD.open = false; paintBuddy(); } }, 9000);
+    for (const p of ['run', 'coffee', 'clipboard', 'inspect', 'thumbs', 'shrug']) new Image().src = `img/mascot/${p}.webp`;
+  }
+  BUD.sec = sec;
+  paintBuddy(true);
+}
+function buddyAct(a) {
+  BUD.hello = false; clearTimeout(BUD.t);
+  if (a === 'report') return go('pdf-client');
+  if (a === 'next') { const next = buddyNext(); if (next) go(next); return; }
+  if (a === 'face') { if (BUD.away) { BUD.away = false; BUD.open = true; } else BUD.open = !BUD.open; }
+  if (a === 'shut') BUD.open = false;
+  if (a === 'away') { BUD.away = true; BUD.open = false; }
+  try { localStorage.setItem('sensecheck.buddy', BUD.away ? 'away' : 'here'); } catch { /* storage unavailable */ }
+  paintBuddy(a === 'face');
+}
 
 drawUser();
 render();
