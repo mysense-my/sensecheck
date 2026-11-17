@@ -14,8 +14,6 @@ const SEV = { Critical: 'bad', High: 'warn', Medium: 'mid', Low: 'info' };
 const htone = v => (v == null ? 'info' : v >= 80 ? 'good' : v >= 55 ? 'warn' : 'bad');
 const tone = v => (v == null ? 'info' : v >= 90 ? 'good' : v >= 50 ? 'warn' : 'bad');
 
-// the SenseCheck mark, with a set size so every browser can draw it
-const MARK = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="256" height="256"><rect width="64" height="64" rx="19" fill="#812FDF"/><circle cx="23.5" cy="24" r="5.2" fill="#FCD61C"/><circle cx="40.5" cy="24" r="5.2" fill="#F65D8C"/><path d="M21.5 38.5l8 8L43 32" fill="none" stroke="#fff" stroke-width="6.2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
 const loadLib = () => (window.PptxGenJS ? Promise.resolve() : new Promise((ok, no) => {
   const sc = document.createElement('script'); sc.src = 'vendor/pptxgen.bundle.js';
   sc.onload = () => ok(); sc.onerror = () => no(new Error('The slide tool did not load.')); document.head.appendChild(sc);
@@ -52,7 +50,7 @@ export async function makeSlides(r, mode, o, k) {
   const S = P.ShapeType;
 
   // pictures used on more than one slide
-  const [logo, mark, wave, thumbs, shotD, shotM] = await Promise.all([pic('img/mysense-light.png'), pic('data:image/svg+xml;charset=utf-8,' + encodeURIComponent(MARK), 'image/png', 256), pic('img/mascot/wave.webp', 'image/png', 700), pic('img/mascot/thumbs.webp', 'image/png', 700), pic(k.shots.d, 'image/jpeg'), pic(k.shots.m, 'image/jpeg', 700)]);
+  const [logo, mark, wave, thumbs, shotD, shotM] = await Promise.all([pic('img/mysense-light.png'), pic('img/logo-64.png', 'image/png', 64), pic('img/mascot/wave.webp', 'image/png', 700), pic('img/mascot/thumbs.webp', 'image/png', 700), pic(k.shots.d, 'image/jpeg'), pic(k.shots.m, 'image/jpeg', 700)]);
 
   // ---- small drawing helpers
   const text = (s, t, opt) => s.addText(typeof t === 'string' || typeof t === 'number' ? String(t) : t, { fontFace: F, fontSize: 12, color: C.ink, margin: 0, valign: 'top', ...opt });

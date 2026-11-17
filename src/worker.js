@@ -125,14 +125,14 @@ const cookieOf = request => ((request.headers.get('cookie') || '').match(/(?:^|;
 // The screen people see before they are let in. The left side tells a colleague what the tool is for.
 function lockPage(status, message, form) {
   const html = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<meta name="robots" content="noindex,nofollow"><title>SenseCheck</title>
+<meta name="robots" content="noindex,nofollow"><title>SenseCheck</title><link rel="icon" type="image/png" href="/img/logo-64.png">
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600&display=swap" rel="stylesheet">
 <style>*{box-sizing:border-box}body{margin:0;min-height:100vh;display:grid;place-items:center;padding:16px;background:#ECEAE4;color:#16171B;font:400 15.5px/1.5 Outfit,system-ui,sans-serif}
 .wrap{display:grid;grid-template-columns:minmax(0,1.15fr) minmax(0,1fr);width:100%;max-width:880px;background:#fff;border-radius:28px;overflow:hidden;box-shadow:0 0 0 1px #E8E5DD,0 40px 90px -60px rgba(50,40,20,.45)}
 .intro{position:relative;background:#EFE8FC;color:#16171B;padding:44px 40px 40px;overflow:hidden}
 .by{display:block;width:132px;height:auto;margin-top:96px}
-.buddy{position:absolute;right:26px;bottom:22px;width:136px;height:auto}
+.buddy{position:absolute;right:24px;bottom:18px;width:auto;height:134px}
 .brand{display:flex;align-items:center;gap:10px;font-weight:600;font-size:19px}
 h1{margin:30px 0 12px;font-size:28px;line-height:1.2;font-weight:600;letter-spacing:-.02em;text-wrap:balance}
 .intro p{margin:0;color:#55575E}
@@ -145,14 +145,14 @@ form{margin-top:22px;display:grid;gap:12px}label{font-size:13.5px;font-weight:50
 input{width:100%;height:50px;border:0;border-radius:999px;background:#fff;box-shadow:inset 0 0 0 1px #E3E0D8;padding:0 20px;font:inherit;outline:0}input:focus{box-shadow:0 0 0 2px #812FDF}
 button{height:48px;border:0;border-radius:999px;background:#16171B;color:#fff;font:500 15px Outfit,system-ui,sans-serif;cursor:pointer}button:hover{background:#2B2140}
 .err{color:#C7321F!important;font-weight:500;margin-top:14px!important}
-@media (max-width:720px){.wrap{grid-template-columns:minmax(0,1fr)}.intro,.gate{padding:28px 24px}h1{font-size:24px;margin-top:22px}.buddy{width:96px;right:16px;bottom:14px}}</style></head><body><main class="wrap">
+@media (max-width:720px){.wrap{grid-template-columns:minmax(0,1fr)}.intro,.gate{padding:28px 24px}h1{font-size:24px;margin-top:22px}.buddy{height:104px;right:12px;bottom:10px}}</style></head><body><main class="wrap">
 <section class="intro">
-<div class="brand"><svg viewBox="0 0 64 64" width="32" height="32" aria-hidden="true"><rect width="64" height="64" rx="19" fill="#812FDF"/><circle cx="23.5" cy="24" r="5.2" fill="#FCD61C"/><circle cx="40.5" cy="24" r="5.2" fill="#F65D8C"/><path d="M21.5 38.5l8 8L43 32" fill="none" stroke="#fff" stroke-width="6.2" stroke-linecap="round" stroke-linejoin="round"/></svg>SenseCheck</div>
+<div class="brand"><img src="/img/logo.png" alt="" width="34" height="34">SenseCheck</div>
 <h1>Pitching a client but not sure what their website needs?</h1>
 <p>Paste their link. We go through the whole website and tell you, in plain words, what\u2019s wrong and what to propose.</p>
-<ul><li>Site health: speed, SEO, design and security</li><li>What it is built on, and if we can take it on</li><li>What to recommend, in a PDF for the client</li></ul>
+<ul><li>Site health: speed, SEO, design and security</li><li>What it is built on, and if we can take it on</li><li>What to recommend, in a report for the client</li></ul>
 <img class="by" src="/img/mysense-light.png" alt="MYSense. With us, everything makes sense" width="447" height="141">
-<img class="buddy" src="/img/mascot/wave.webp" alt="" width="520" height="485">
+<img class="buddy" src="/img/mascot/wave.webp" alt="" width="421" height="600">
 </section>
 <section class="gate">
 ${form ? `<h2>Enter the team passcode</h2><p>This tool is for the MYSense team.</p>${message ? `<p class="err" role="alert">${message}</p>` : ''}
@@ -280,7 +280,7 @@ export default {
   async fetch(request, env) {
     const url = new URL(request.url);
     // The pictures the login screen shows are the only things served without signing in.
-    if (/^\/img\/(mysense-(light|dark)\.png|mascot\/wave\.webp)$/.test(url.pathname)) return env.ASSETS.fetch(request);
+    if (/^\/img\/(mysense-(light|dark)\.png|logo(-64)?\.png|mascot\/wave\.webp)$/.test(url.pathname)) return env.ASSETS.fetch(request);
     const api = url.pathname.startsWith('/api/');
     let me = { email: null, admin: false };
     if (env.ACCESS_TEAM && env.ACCESS_AUD) {

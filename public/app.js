@@ -1,6 +1,7 @@
 import { tr } from './bm.js';
 import { detectStack, summarisePsi, diagnose, dnsClues, vulnsFor } from './analyze.js';
 import { techIcon } from './techicons.js';
+import { movePill, moveThumbs, sheetIn, sheetOut, sheetDrag, fly, resize, countUp, watchScroll, crossFade } from './motion.js';
 import { readPage, buildIssues, healthOf, strengthsOf, skillsFit, nextSteps, verdictOf, whyOf, ideasOf, speedPlan, designOf as designVerdict, norm, CATS, CAT_NAME } from './audit.js';
 
 const CFG = await fetch('config.json').then(r => r.json());
@@ -35,7 +36,7 @@ const icon = n => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" st
 // The SenseCheck mascot. Poses: wave, point, inspect, underline, thumbs, clipboard, run, shrug, coffee.
 const mascot = (pose, size = 'md', extra = '') => `<span class="mascot ${size} ${extra}" aria-hidden="true"><img src="img/mascot/${pose}.webp" alt="" decoding="async"></span>`;
 const hd = (ic, colour) => `<span class="ic ${colour}">${icon(ic)}</span>`; // coloured icon chip for a section title
-const LOGO = '<svg viewBox="0 0 64 64" width="22" height="22"><rect width="64" height="64" rx="19" fill="#812FDF"/><circle cx="23.5" cy="24" r="5.2" fill="#FCD61C"/><circle cx="40.5" cy="24" r="5.2" fill="#F65D8C"/><path d="M21.5 38.5l8 8L43 32" fill="none" stroke="#fff" stroke-width="6.2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+const LOGO = '<img class="rp-mark" src="img/logo-64.png" alt="" width="22" height="22">';   // the small copy: it is packed into every exported report
 const fmt = iso => new Date(iso).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
 const good = p => (p && !p.error ? p : null);
 const tone = v => (v == null ? 'info' : v >= 90 ? 'good' : v >= 50 ? 'warn' : 'bad');
@@ -379,6 +380,7 @@ async function runScan(raw, opt = {}) {
   try { u = new URL(href); if (!u.hostname.includes('.')) throw 0; } catch { return toast('That does not look like a website address.'); }
   const domain = u.hostname.replace(/^www\./, '');
   if (vsFor && vsFor.domain === domain) return toast('That is the same website. Paste a competitor’s link.');
+  S.swapFrom = S.route === 'new' && $('.start') ? $('.start').offsetHeight : 0;   // the start card's height, so the scan card can grow out of it
   S.busy = true; S.route = 'scan'; drawNav(); renderScan(domain, vsFor);
   ['site', 'm', 'd'].forEach(id => step(id, 'run'));
   const speed = st => speedTest(u.href, st).then(v => (step(st[0], 'done', v.partial ? 'Only partly loaded' : ''), sofar({ [st]: v.scores.performance }), v), e => (step(st[0], 'fail', e.message), { error: e.message }));
@@ -480,18 +482,22 @@ async function runScan(raw, opt = {}) {
   open(r);
 }
 
-function open(r) {
+function open(r, from) {
   S.result = r; S.route = 'result'; S.sec = 'overview'; S.q = ''; S.cat = 'all'; S.more = false;
   render();
   window.scrollTo(0, 0);
+  if (from) fly($('.crumb b'), from);   // from: where the site name was on screen in the list that was tapped
 }
 
 // ---------- views
+// Cards float in when a screen is new. Drawing the same screen again (a row removed, a filter changed) leaves them be.
+let lastView = '';
+const fresh = name => { const yes = lastView !== name; lastView = name; return yes; };
 function drawNav() {
   const res = S.route === 'result', none = !S.result;
   const b = (go, ic, label, on, dis) => `<button type="button" data-go="${go}" class="${on ? 'on' : ''}"${dis ? ' disabled' : ''}>${icon(ic)}${label}</button>`;
   const keep = nav.scrollLeft;
-  nav.innerHTML = b('new', 'plus', 'New scan', S.route === 'new' || S.route === 'scan')
+  nav.innerHTML = '<i class="nav-pill" aria-hidden="true"></i>' + b('new', 'plus', 'New scan', S.route === 'new' || S.route === 'scan')
     + b('overview', 'grid', 'Overview', res && S.sec === 'overview', none)
     + (S.result && S.result.vs ? b('compare', 'versus', 'Competitor', res && S.sec === 'compare') : '')
     + b('speed', 'gauge', 'Page speed', res && S.sec === 'speed', none)
@@ -505,6 +511,7 @@ function drawNav() {
   nav.scrollLeft = keep;
   const on = nav.querySelector('.on');
   if (on && nav.scrollWidth > nav.clientWidth + 4) { const a = on.getBoundingClientRect(), n = nav.getBoundingClientRect(); nav.scrollTo({ left: nav.scrollLeft + a.left - n.left - (n.width - a.width) / 2, behavior: 'smooth' }); }
+  movePill(nav);   // the highlight slides from the old item to this one
   drawBuddy();
 }
 
@@ -537,7 +544,7 @@ function renderNew() {
     </div>${mascot('wave', 'xl', 'blob')}</div>
     ${rows.length ? historyCard(rows, H.server ? 'My recent scans' : 'Recent scans') : ''}`;
   const u = $('#u'); if (u && window.matchMedia('(min-width: 821px)').matches) u.focus({ preventScroll: true });
-  floatIn();
+  if (fresh('new')) floatIn();
 }
 
 function renderHistory() {
@@ -545,18 +552,20 @@ function renderHistory() {
   view.innerHTML = `<div class="top"><div class="crumb">SenseCheck<i>&rsaquo;</i><b>History</b></div></div>
     ${rows.length || ME.admin ? historyCard(rows, all ? 'Everyone\u2019s scans' : H.server ? 'My scans' : 'Past scans on this browser', all) : ''}
     ${rows.length ? '' : `<div class="card emptybox">${mascot('coffee', 'lg', 'blob')}<p class="empty">No scans yet. Run your first check from New scan.</p></div>`}`;
-  floatIn();
+  if (fresh('history')) floatIn();
 }
 
 function renderScan(domain, vsFor) {
   SOFAR = {};
+  const before = S.swapFrom || 0; S.swapFrom = 0;
   view.innerHTML = `<div class="top"><div class="crumb">Scans<i>&rsaquo;</i><b>${esc(domain)}</b></div></div>
     <div class="card start hasbuddy"><div class="start-main"><h1>Checking ${esc(domain)}</h1>
     <p>${vsFor ? `This is the competitor for ${esc(vsFor.domain)}. ` : ''}We check the homepage and the main pages around it, two at a time so we don\u2019t slow the website down. Blog posts are left out because they all share one layout. Keep this tab open until it finishes.</p>
     <div class="steps">${[['site', 'Reading the site'], ['stack', 'Identifying the tech stack'], ['pages', 'Checking pages'], ['m', 'Measuring mobile speed'], ['d', 'Measuring desktop speed']].map(([id, t]) => `<div class="step" id="st-${id}"><span class="ic"></span><span>${t}</span><small></small></div>`).join('')}</div>
     <div class="prog" id="prog" hidden><div class="track"><div class="bar"><i id="progbar"></i></div><img class="runner" id="runner" src="img/mascot/run.webp" alt=""></div><p id="progtext"></p><div id="progask"></div></div>
     <div class="sofar" id="sofar" hidden></div></div>${mascot('inspect', 'xl', 'blob')}</div>`;
-  floatIn();
+  if (before) { const card = $('.start'); card.classList.add('swap'); resize(card, before); }
+  fresh('scan'); floatIn();
 }
 
 // Early results, shown while the rest of the scan is still running, so nobody stares at a blank screen.
@@ -603,7 +612,8 @@ function progressUi() {
 function step(id, st, note) {
   const el = $('#st-' + id); if (!el) return;
   el.className = 'step ' + st;
-  el.querySelector('.ic').textContent = st === 'done' ? '\u2713' : st === 'fail' ? '!' : '';
+  const ic = el.querySelector('.ic'), was = ic.dataset.st || '';
+  if (was !== st) { ic.dataset.st = st; ic.innerHTML = st === 'done' ? '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5" pathLength="1"/></svg>' : st === 'fail' ? '!' : ''; }
   if (note != null) el.querySelector('small').textContent = note;
   // the mascot on the scan screen changes with the job in hand
   const pose = st === 'run' ? { site: 'inspect', stack: 'clipboard', pages: 'run' }[id] : id === 'pages' ? 'coffee' : '';
@@ -619,7 +629,7 @@ function renderFail(domain, d) {
     <div class="card start hasbuddy"><div class="start-main"><h1>Could not check ${esc(domain)}</h1>
     <p><b>${esc(d.title)}.</b> ${esc(d.why)}</p><p style="margin-top:12px"><b>What to do:</b> ${esc(d.next)}</p>
     <div class="urlrow"><button class="btn primary" type="button" data-go="new">Try another link</button></div></div>${mascot('shrug', 'xl', 'blob')}</div>`;
-  floatIn();
+  fresh('fail'); floatIn();
 }
 
 // Notice shown when the site was blocked or only partly readable, with the specific reason.
@@ -765,7 +775,7 @@ function renderResult() {
   if (any) { drawChart($('#chart-scores'), scoreGroups(m, d), { labels: true, bw: 22 }); drawChart($('#chart-speed'), speedGroups(m, d)); }
   if (r.vs) drawChart($('#chart-vs'), vsGroups(r), VS_CHART);
   drawRows();
-  floatIn();
+  fresh('result'); floatIn();
 }
 
 function drawRows() {
@@ -786,12 +796,12 @@ function chartGeo(n, o = {}) {
 }
 function chartSvg(groups, o = {}) {
   const G = chartGeo(groups.length, o), { W, Hh, L, R, T, ph, gw, bw, gap, y } = G;
-  const bar = (x, p, k) => { if (!p || p.score == null) return ''; const h = Math.max(3, (p.score / 100) * ph), r = Math.min(4, h), yy = y(0) - h; return `<path class="bar ${k}" d="M${x},${y(0)}V${yy + r}Q${x},${yy} ${x + r},${yy}H${x + bw - r}Q${x + bw},${yy} ${x + bw},${yy + r}V${y(0)}Z"/>${o.labels ? `<text class="val" x="${x + bw / 2}" y="${yy - 6}" text-anchor="middle">${esc(p.display)}</text>` : ''}`; };
+  const bar = (x, p, k, i) => { if (!p || p.score == null) return ''; const h = Math.max(3, (p.score / 100) * ph), r = Math.min(4, h), yy = y(0) - h; return `<path class="bar ${k}" style="--i:${i}" d="M${x},${y(0)}V${yy + r}Q${x},${yy} ${x + r},${yy}H${x + bw - r}Q${x + bw},${yy} ${x + bw},${yy + r}V${y(0)}Z"/>${o.labels ? `<text class="val" style="--i:${i}" x="${x + bw / 2}" y="${yy - 6}" text-anchor="middle">${esc(p.display)}</text>` : ''}`; };
   let s = `<svg viewBox="0 0 ${W} ${Hh}" role="img" aria-label="Scores out of 100 for mobile and desktop">`;
   for (const t of [0, 50, 100]) s += `<line class="grid" x1="${L}" x2="${W - R}" y1="${y(t)}" y2="${y(t)}"/><text class="tick" x="${L - 10}" y="${y(t) + 4}" text-anchor="end">${t}</text>`;
   groups.forEach((g, i) => {
     const cx = L + gw * i + gw / 2;
-    s += `<rect class="hit" data-i="${i}" x="${cx - gw / 2 + 6}" y="${T - 6}" width="${gw - 12}" height="${ph + 6}" rx="14"/>` + bar(cx - bw - gap / 2, g.m, 'm') + bar(cx + gap / 2, g.d, 'd')
+    s += `<rect class="hit" data-i="${i}" x="${cx - gw / 2 + 6}" y="${T - 6}" width="${gw - 12}" height="${ph + 6}" rx="14"/>` + bar(cx - bw - gap / 2, g.m, 'm', i) + bar(cx + gap / 2, g.d, 'd', i)
       + `<text class="tick" x="${cx}" y="${Hh - 8}" text-anchor="middle">${esc(g.short)}</text>`;
   });
   return s + '</svg>';
@@ -815,8 +825,23 @@ function drawChart(el, groups, o = {}) {
 
 // ---------- small dialog (compare, summary, PDF options)
 const modal = document.body.appendChild(Object.assign(document.createElement('div'), { id: 'modal', className: 'modal', hidden: true })); // on <body>, so it is fixed to the window and not to the page
-function openModal(html) { modal.innerHTML = `<div class="sheet" role="dialog" aria-modal="true">${html}</div>`; modal.hidden = false; const f = modal.querySelector('input,textarea,select'); if (f) f.focus(); }
-function closeModal() { modal.hidden = true; modal.innerHTML = ''; }
+// Dialogs are sheets (see motion.js): they spring in, and on a phone they rise from the bottom edge and can be
+// dragged down. modal.hidden still means "no dialog": it flips once the closing animation has finished.
+let modalRun = 0;
+function openModal(html) {
+  modalRun++;
+  modal.innerHTML = `<div class="sheet" role="dialog" aria-modal="true"><i class="grab" aria-hidden="true"></i>${html}</div>`;
+  modal.hidden = false;
+  moveThumbs(modal, true);
+  sheetIn(modal);
+  const f = modal.querySelector('input,textarea,select'); if (f && !narrow.matches) f.focus({ preventScroll: true });   // on a phone the keyboard waits until a field is tapped
+}
+function closeModal() {
+  if (modal.hidden || modal.classList.contains('out')) return;
+  const run = ++modalRun;
+  sheetOut(modal, () => { if (run !== modalRun) return; modal.hidden = true; modal.innerHTML = ''; modal.classList.remove('out'); });
+}
+sheetDrag(modal, closeModal);
 modal.addEventListener('mousedown', e => { if (e.target === modal) closeModal(); });
 document.addEventListener('keydown', e => { if (e.key === 'Escape' && !modal.hidden) closeModal(); });
 
@@ -826,7 +851,12 @@ function act(name) {
   if (name === 'rival') return rivalDialog();
   if (name === 'rival-remove') { closeModal(); delete S.result.vs; H.update(S.result).catch(e => toast(e.message)); S.sec = 'overview'; return render(); }
   if (name === 'summary') return summaryDialog('en');
-  if (name === 'sum-en' || name === 'sum-bm') return summaryDialog(name.slice(4));
+  if (name === 'sum-en' || name === 'sum-bm') {
+    const box = $('#sum-text'); if (!box) return summaryDialog(name.slice(4));
+    box.value = summaryText(S.result, name.slice(4));
+    modal.querySelectorAll('.seg button').forEach(b => b.classList.toggle('on', b.dataset.act === name));
+    return moveThumbs(modal);
+  }
   if (name === 'sum-copy') return copyText($('#sum-text').value);
   if (name === 'ai') return aiReview();
 }
@@ -1186,7 +1216,7 @@ function spy() {
   if (window.innerHeight + window.scrollY >= document.documentElement.scrollHeight - 4) cur = 'steps';
   if (cur !== S.sec) { S.sec = cur; drawNav(); }
 }
-window.addEventListener('scroll', () => { if (!spyWait) spyWait = setTimeout(spy, 70); }, { passive: true });
+window.addEventListener('scroll', () => { watchScroll(); if (!spyWait) spyWait = setTimeout(spy, 70); }, { passive: true });
 
 document.addEventListener('click', e => {
   const bud = e.target.closest('[data-buddy]');
@@ -1197,8 +1227,11 @@ document.addEventListener('click', e => {
   if (!t) return;
   if (t.dataset.act) return act(t.dataset.act);
   if (t.dataset.go) { e.preventDefault(); go(t.dataset.go); }
-  else if (t.dataset.open) H.get(t.dataset.open).then(r => r && open(r)).catch(e => toast(e.message));
-  else if (t.dataset.remove) H.remove(t.dataset.remove).then(render).catch(e => toast(e.message));
+  else if (t.dataset.open) { const name = t.closest('tr') && t.closest('tr').querySelector('td b'), from = name ? name.getBoundingClientRect() : null; H.get(t.dataset.open).then(r => r && open(r, from)).catch(e => toast(e.message)); }
+  else if (t.dataset.remove) {   // the row slides away first, then the list is drawn again without it
+    const row = t.closest('tr'); if (row) row.classList.add('leaving');
+    Promise.all([H.remove(t.dataset.remove), sleep(calm.matches ? 0 : 240)]).then(render).catch(e => { if (row) row.classList.remove('leaving'); toast(e.message); });
+  }
   else if ('rescan' in t.dataset) runScan(S.result.url);
   else if (t.id === 'more') { S.more = !S.more; drawRows(); }
 });
@@ -1220,21 +1253,25 @@ document.addEventListener('change', e => {
   if (e.target.id === 'cat') { S.cat = e.target.value; S.more = false; drawRows(); }
   if (e.target.id === 'max') S.max = +e.target.value;
   if (e.target.id === 'who') { S.who = e.target.value; render(); }
-  if (e.target.name === 'fmt' && FORMATS[e.target.value]) { $('#fmt-hint').textContent = FORMATS[e.target.value][1]; $('#fmt-go').lastChild.textContent = FORMATS[e.target.value][2]; }
+  if (e.target.name === 'fmt' && FORMATS[e.target.value]) { $('#fmt-hint').textContent = FORMATS[e.target.value][1]; $('#fmt-go').lastChild.textContent = FORMATS[e.target.value][2]; moveThumbs(modal); }
   if (e.target.id === 'devuser' && ME.local) fetch('/api/dev-login?as=' + encodeURIComponent(e.target.value), { method: 'POST' }).then(() => location.reload());
 });
 document.addEventListener('input', e => { if (e.target.id === 'q') { S.q = e.target.value; drawRows(); } });
 
 // Light and dark mode, remembered in this browser.
 const themeBtn = $('#theme');
+let THEME = document.documentElement.dataset.theme === 'dark' ? 'dark' : 'light';
+themeBtn.setAttribute('role', 'switch');
+themeBtn.setAttribute('aria-label', 'Dark mode');
+themeBtn.innerHTML = `<span class="sw" aria-hidden="true"><i>${icon('sun').replace('<svg', '<svg class="sun"')}${icon('moon').replace('<svg', '<svg class="moon"')}</i></span>Dark mode`;
 function setTheme(t) {
+  THEME = t;
   document.documentElement.dataset.theme = t;
   try { localStorage.setItem('sensecheck.theme', t); } catch { /* storage unavailable */ }
-  themeBtn.innerHTML = t === 'dark' ? icon('sun') + 'Light mode' : icon('moon') + 'Dark mode';
-  themeBtn.setAttribute('aria-label', t === 'dark' ? 'Switch to light mode' : 'Switch to dark mode');
+  themeBtn.setAttribute('aria-checked', String(t === 'dark'));
 }
-setTheme(document.documentElement.dataset.theme === 'dark' ? 'dark' : 'light');
-themeBtn.addEventListener('click', () => setTheme(document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark'));
+setTheme(THEME);
+themeBtn.addEventListener('click', () => { const next = THEME === 'dark' ? 'light' : 'dark'; THEME = next; crossFade(() => setTheme(next)); });
 
 // ---------- cards float up into place
 // Each card waits a little lower and smaller, then rises, pops just past its spot and settles, like something
@@ -1245,8 +1282,10 @@ const riser = 'IntersectionObserver' in window ? new IntersectionObserver(list =
   const up = list.filter(e => e.isIntersecting).sort((a, b) => a.boundingClientRect.top - b.boundingClientRect.top || a.boundingClientRect.left - b.boundingClientRect.left);
   up.forEach((e, i) => {
     const el = e.target; riser.unobserve(el);
-    el.style.setProperty('--rise-wait', `${Math.min(i, 6) * 90}ms`); // cards that arrive together come up one after another
+    const wait = Math.min(i, 6) * 90;
+    el.style.setProperty('--rise-wait', `${wait}ms`); // cards that arrive together come up one after another
     el.classList.add('rise-go');
+    countUp(el.querySelector('.health b'), wait + 380);
     el.addEventListener('animationend', function done(ev) {
       if (ev.target !== el || ev.pseudoElement) return;
       el.removeEventListener('animationend', done); el.classList.remove('rise', 'rise-go', 'rise-flat'); el.style.removeProperty('--rise-wait');
@@ -1255,7 +1294,7 @@ const riser = 'IntersectionObserver' in window ? new IntersectionObserver(list =
 }, { rootMargin: '0px 0px -4% 0px' }) : null;
 function floatIn() {
   if (!riser || calm.matches) return;
-  const els = [...view.querySelectorAll('.card:not(.hero3), .hero3 > .col, .hero3 > .summary')];
+  const els = [...view.querySelectorAll('.card:not(.hero3):not(.swap), .hero3 > .col, .hero3 > .summary')];
   els.forEach(el => el.classList.add('rise'));
   // wait for the intro to start leaving, so the first cards are not played behind it
   const start = () => { const intro = $('#intro'); if (intro && !intro.classList.contains('out')) return setTimeout(start, 120); els.forEach(el => el.isConnected && riser.observe(el)); };
@@ -1315,7 +1354,8 @@ function paintBuddy(hop) {
   if (im.dataset.pose !== pose) { im.dataset.pose = pose; im.src = `img/mascot/${pose}.webp`; }
   if (hop) boing(face);
   buddy.classList.toggle('away', BUD.away);
-  say.hidden = !BUD.open || BUD.away;
+  if (BUD.open && !BUD.away) { say.classList.remove('out'); say.hidden = false; }
+  else if (!say.hidden && !say.classList.contains('out')) { say.classList.add('out'); setTimeout(() => { if (say.classList.contains('out')) { say.hidden = true; say.classList.remove('out'); } }, calm.matches ? 0 : 190); }
   $('p', say).textContent = text + (BUD.hello && BUD.sec === 'overview' ? ' Tap me on any section for the short version.' : '');
   $('.buddy-acts', say).innerHTML = (next ? `<button type="button" class="btn primary" data-buddy="next">Next: ${SEC_NAME[next]}</button>` : `<button type="button" class="btn primary" data-buddy="report">${icon('down')}Client report</button>`) + '<button type="button" class="link" data-buddy="away">Hide me</button>';
 }

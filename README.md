@@ -94,11 +94,13 @@ To switch it on: create an API key at console.anthropic.com (this is billed sepa
 
 - The look (warm light surfaces, light sidebar, black pill buttons, one dark score card, pastel tiles) is the block at the end of `public/app.css` headed "Look, round two". Colours are the variables at the top of that block, with a matching set for dark mode.
 - The sidebar is the block headed "Sidebar, round three" at the end of `public/app.css`: a purple menu attached to the left wall with curved joins (the small `::before` / `::after` pieces draw the curves), sticky so it follows the page, and it marks the section in view (`spy()` in `app.js`). The account piece at the bottom has the same curve and does not move.
-- The mascot cutouts are made by `_design/cutout.py` from the sheet in `_design/raw/` (both stay on this computer, not in the repository).
-- The logo mark is `public/img/logo.svg` (a purple rounded square with two dots and a tick smile). The same drawing is written inline in `index.html`, in `app.js` (`LOGO`) and on the login page in `src/worker.js`, so change all four together.
-- The mascot poses are `public/img/mascot/*.webp`: wave, point, inspect, underline, thumbs, clipboard, run, shrug, coffee. `mascot(pose, size)` in `app.js` places one. Its arms and legs are dark navy, so in dark mode it always stands on a light disc.
-- The login screen may only show `mysense-light.png`, `mysense-dark.png` and `mascot/wave.webp` without a passcode. Everything else stays locked.
+- The mascot cutouts are made by `_design/cutout2.py` from the sheet in `_design/raw/` (both stay on this computer, not in the repository): `python3 _design/cutout2.py <sheet> <out folder> 3 3 wave,point,inspect,underline,thumbs,clipboard,run,shrug,coffee 600 webp`.
+- The logo is the mascot's face in a round purple badge: `public/img/logo.png` (256 px) and `public/img/logo-64.png` (the browser tab icon, the report header and the slide footer). To change it, replace those two files; nothing is drawn inline any more. Five other marks from the same sheet are kept in `_design/logo2/`.
+- The mascot is a little inspector in a purple cap with a tick badge, drawn in the 1930s rubber-hose cartoon style in the MYSense colours. The poses are `public/img/mascot/*.webp`: wave, point, inspect, underline, thumbs, clipboard, run, shrug, coffee. `mascot(pose, size)` in `app.js` places one. He stands the same height in every pose, so sizes go by height (`--tall` in "Round six" of `app.css`). In dark mode a thin light edge keeps his dark outline visible. The marker line in the underline pose is measured, and the numbers sit beside `.short-head` in "Round six": change the picture and they must be measured again.
+- The login screen may only show `mysense-light.png`, `mysense-dark.png`, `logo.png`, `logo-64.png` and `mascot/wave.webp` without a passcode. Everything else stays locked.
 - "Round four" at the end of `public/app.css` holds the later additions: the file-type picker, the tech icons, the menu that stays at the top on phones, the float-in of the cards (`rise` keyframes, started by `floatIn()` in `app.js`; skipped for people who ask their device for less motion) and the mascot's reactions (the corner helper is `drawBuddy()` / `buddyLine()` in `app.js`).
+
+- "Round five" in `public/app.css` together with `public/motion.js` is the iPhone-style motion: one set of spring curves (`--spring`, `--spring-snappy`, `--spring-bouncy`, `--spring-pop`, worked out by `_design/tools/springs.py`), controls that shrink a little when pressed, dialogs that open as sheets (from the bottom edge on phones, where they can be dragged down and the page behind steps back), a menu highlight and selector thumbs that slide, a title bar that turns to frosted glass once the page scrolls, a message pill at the top, a dark mode switch, a health score that counts up and chart bars that grow. The app works the same with `motion.js` taken out, and all of it switches off for people who ask their device for less motion.
 
 ## How it is put together
 
@@ -106,6 +108,7 @@ To switch it on: create an API key at console.anthropic.com (this is billed sepa
   - `analyze.js`: tech stack detection and PageSpeed parsing.
   - `audit.js`: page checks, issues and severities, Health Score, strengths, skills fit, next steps.
   - `app.js`: scan flow, crawl, interface, charts, the competitor comparison, the copy summary, the report layout (PDF and web page) and the corner helper.
+  - `motion.js`: the iPhone-style movement (springs, sheets, sliding highlights). Only adds movement; nothing depends on it.
   - `slides.js`: the report as a PowerPoint deck. It is only loaded when someone picks PowerPoint, together with `vendor/pptxgen.bundle.js` (PptxGenJS 4.0.1, MIT licence, unchanged from the npm package).
   - `techicons.js`: the brand icons shown in the tech stack. The shapes are from Simple Icons 16.30.0 (CC0). To add one, copy its path into `ICONS` and add a line to `RULES`. Names without an icon get a tile with their first letter.
   - `bm.js`: Bahasa Malaysia wording for the client report and the copy summary.
