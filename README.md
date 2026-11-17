@@ -10,10 +10,11 @@ Internal MYSense tool. Paste one website link and get a single report: what the 
 3. Read the result top to bottom: Health Score, what's behind the scores, page speed (mobile and desktop side by side), design, tech stack, strengths, findings, next steps. The wording is deliberately plain and friendly so it can be read out to a client.
    The **Dark mode** switch at the top right changes the look for you only. PDFs always print light.
    The **Design** section groups its advice by area (first impression, fonts and colours, photos, layout, trust, phones). Each item says what we saw, why it matters and what we would do. "Ideas worth pitching" lists things the site does not have yet (video, FAQ, map and so on); these never affect the score. The verdict comes from rules that catch a dated or broken look. Rules cannot judge taste, so have a designer look before pitching a redesign, or use the AI design opinion if it is switched on (see below).
+   **How to make it faster** sits under the speed charts when the phone score is below 90. It lists up to five jobs, most useful first, picked from where the weight and the waiting actually go on that page, with what we would do and roughly how much time each could save.
    **Copy summary** gives a short message for WhatsApp or email, in English or Bahasa Malaysia, that you can edit before copying.
    **Compare with a competitor** runs the same check on a competitor's link and puts the two side by side. The comparison is added to both PDFs.
 4. **Client PDF** is the version to share. **Internal PDF** adds the "Can we take it?" verdict, versions with confidence levels, our package names and the price guide. Do not send the internal one to clients. Both ask for an optional client name and your name for the cover page. The client PDF can be made in English or Bahasa Malaysia.
-5. **History** lists your own past scans. Once personal logins are live they are saved under your email, so you see the same list on any computer, and nobody else sees yours. Scans are removed automatically after 24 hours. Use **Remove** to delete one sooner. Scanning the same site again shows the previous Health Score for a before-and-after.
+5. **History** lists your own past scans. Once personal logins are live they are saved under your email, so you see the same list on any computer, and nobody else sees yours. Scans are removed automatically after 24 hours. Use **Remove** to delete one sooner. A small copy of the website's screenshots is saved with each scan, so the real site still shows when you reopen it. Scanning the same site again shows the previous Health Score for a before-and-after.
 6. Admins get a **Show: Everyone's scans** switch on the History page, with a "Scanned by" column.
 
 "Not detected" and "Not measured" mean the site hides that detail. The tool does not guess.
@@ -21,6 +22,8 @@ Internal MYSense tool. Paste one website link and get a single report: what the 
 **When a site cannot be read.** The result opens with a notice naming the exact cause, for example Cloudflare bot protection, a Wordfence or Sucuri block, an expired SSL certificate, a suspended hosting account or a domain that does not resolve, with what to do next. Speed scores still appear, because Google runs that test itself.
 
 **How the tech stack is found.** The homepage code is read first, then every other page in the scan, then the list of files Google's test saw load, then DNS records, robots.txt and the usual login addresses. The Tech stack card lists what was checked under "How we checked". If the platform still cannot be identified, the card says why.
+
+**The intro.** A short SenseCheck intro plays the first time the tool is opened in a browser session. Click anywhere or press any key to skip it. It does not play again until the browser is closed and reopened, and it is skipped for people whose device is set to reduce motion. Add `?intro` to the address to see it again.
 
 ## Admin guide (rules, Skills Matrix, packages)
 
@@ -82,6 +85,15 @@ To switch it on: create an API key at console.anthropic.com (this is billed sepa
 - **Security certificate expiry**: public certificate logs through certspotter.com (free, no key). It flags a certificate that is unusually close to its end date.
 - **Elementor starter colours**: the site's own Elementor kit file is read to see whether the site-wide colours were ever changed.
 - **Bahasa Malaysia wording** lives in `public/bm.js`. When a line in `audit.js` or `analyze.js` is reworded, update its twin there. A line with no Malay twin simply stays in English.
+
+## Look, logo and mascot
+
+- The look (warm light surfaces, light sidebar, black pill buttons, one dark score card, pastel tiles) is the block at the end of `public/app.css` headed "Look, round two". Colours are the variables at the top of that block, with a matching set for dark mode.
+- The sidebar is the block headed "Sidebar, round three" at the end of `public/app.css`: a purple menu attached to the left wall with curved joins (the small `::before` / `::after` pieces draw the curves), sticky so it follows the page, and it marks the section in view (`spy()` in `app.js`). The account piece at the bottom has the same curve and does not move.
+- The mascot cutouts are made by `_design/cutout.py` from the sheet in `_design/raw/` (both stay on this computer, not in the repository).
+- The logo mark is `public/img/logo.svg` (a purple rounded square with two dots and a tick smile). The same drawing is written inline in `index.html`, in `app.js` (`LOGO`) and on the login page in `src/worker.js`, so change all four together.
+- The mascot poses are `public/img/mascot/*.webp`: wave, point, inspect, underline, thumbs, clipboard, run, shrug, coffee. `mascot(pose, size)` in `app.js` places one. Its arms and legs are dark navy, so in dark mode it always stands on a light disc.
+- The login screen may only show `mysense-light.png`, `mysense-dark.png` and `mascot/wave.webp` without a passcode. Everything else stays locked.
 
 ## How it is put together
 

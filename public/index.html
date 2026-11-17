@@ -5,23 +5,47 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="robots" content="noindex,nofollow">
 <title>SenseCheck</title>
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='10' fill='%23812FDF'/%3E%3Cpath d='M9 16.5l4.5 4.5L23 11.5' fill='none' stroke='%23fff' stroke-width='3.2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='19' fill='%23812FDF'/%3E%3Ccircle cx='23.5' cy='24' r='5.2' fill='%23FCD61C'/%3E%3Ccircle cx='40.5' cy='24' r='5.2' fill='%23F65D8C'/%3E%3Cpath d='M21.5 38.5l8 8L43 32' fill='none' stroke='%23fff' stroke-width='6.2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="app.css">
 <script>try{var t=localStorage.getItem("sensecheck.theme");if(t)document.documentElement.dataset.theme=t}catch(e){}</script>
+<script>try{var again=/[?&]intro\b/.test(location.search);if((sessionStorage.getItem("sensecheck.intro")&&!again)||matchMedia("(prefers-reduced-motion: reduce)").matches)document.documentElement.classList.add("no-intro")}catch(e){}</script>
 </head>
 <body>
+<!-- Intro: plays once per browser session before the app shows. Click or press any key to skip it. -->
+<div id="intro" aria-hidden="true">
+  <div class="in-box">
+    <img class="in-buddy" src="img/mascot/wave.webp" alt="" width="520" height="485">
+    <p class="in-word">SenseCheck<i></i></p>
+    <p class="in-tag">Know what a website needs before you pitch</p>
+    <div class="in-line"><i></i></div>
+  </div>
+  <img class="in-by" src="img/mysense-light.png" alt="" width="447" height="141">
+</div>
+<script>(function(){var el=document.getElementById("intro");if(!el)return;if(document.documentElement.classList.contains("no-intro")){el.remove();return}
+try{sessionStorage.setItem("sensecheck.intro","1")}catch(e){}
+var gone=false,out=function(){if(gone)return;gone=true;el.classList.add("out");setTimeout(function(){el.remove()},800)};
+var go=function(){if(el.classList.contains("go"))return;el.classList.add("go");setTimeout(out,2450)};
+var im=el.querySelector(".in-buddy"),need=2,ready=function(){if(--need<=0)go()};
+try{document.fonts.load("600 48px Outfit").then(ready,ready)}catch(e){ready()}
+if(im&&!im.complete){im.addEventListener("load",ready);im.addEventListener("error",ready)}else ready();
+setTimeout(go,1500);
+el.addEventListener("click",out);document.addEventListener("keydown",function k(){document.removeEventListener("keydown",k);out()});})();</script>
 <div class="shell">
   <aside class="side">
-    <a class="brand" href="#" data-go="new">
-      <svg viewBox="0 0 32 32" width="34" height="34" aria-hidden="true"><rect width="32" height="32" rx="10" fill="#812FDF"/><path d="M9 16.5l4.5 4.5L23 11.5" fill="none" stroke="#fff" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    <div class="side-rail"><div class="pod">
+      <div class="pod-head"><a class="brand" href="#" data-go="new">
+      <svg viewBox="0 0 64 64" width="36" height="36" aria-hidden="true"><rect width="64" height="64" rx="19" fill="#fff"/><circle cx="23.5" cy="24" r="5.2" fill="#FCD61C"/><circle cx="40.5" cy="24" r="5.2" fill="#F65D8C"/><path d="M21.5 38.5l8 8L43 32" fill="none" stroke="#812FDF" stroke-width="6.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
       <span>SenseCheck</span>
-    </a>
-    <nav id="nav" aria-label="Main"></nav>
-    <a class="by" href="https://mysense.com.my" target="_blank" rel="noopener"><img src="img/mysense-dark.png" alt="MYSense. With us, everything makes sense" width="132" height="132"></a>
-    <div class="side-user" id="user"></div>
+    </a></div>
+      <div class="pod-body"><nav id="nav" aria-label="Main"></nav></div>
+    </div></div>
+    <div class="side-foot">
+      <a class="by" href="https://mysense.com.my" target="_blank" rel="noopener"><img class="by-light" src="img/mysense-light.png" alt="MYSense. With us, everything makes sense" width="447" height="141"><img class="by-dark" src="img/mysense-dark.png" alt="" width="132" height="132"></a>
+      <div class="side-user" id="user"></div>
+    </div>
   </aside>
   <main class="main"><button id="theme" class="themebtn" type="button"></button><div class="panel" id="view"></div></main>
 </div>

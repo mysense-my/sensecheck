@@ -426,3 +426,244 @@ table.vs th:first-child{width:38%}
   .rp-cols.two{grid-template-columns:1fr 1fr;margin-top:8pt}
   #report .budget{margin-top:8pt;font-size:9.5pt;color:#5F616A}
 }
+
+/* ---- "How to make it faster" ---- */
+.faster{margin-top:24px;padding-top:22px;border-top:1px solid var(--line)}
+.faster h4{margin:0 0 6px;font-size:17px;font-weight:600;letter-spacing:-.01em}
+.plan{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;margin-top:16px}
+.job{background:var(--soft);border-radius:16px;padding:16px 18px;min-width:0}
+.job-head{display:flex;flex-wrap:wrap;align-items:center;gap:6px 8px}
+.job-head b{font-weight:600;font-size:15.5px;margin-right:auto}
+.job .chip{margin-top:0}
+.chip.start{background:var(--primary);color:#fff}
+.job p{margin:8px 0 0;font-size:14.5px;color:var(--ink2)}
+.job p.fix{color:var(--ink)}
+.job p.gain{color:var(--good);font-weight:500}
+@media (max-width:1100px){ .plan{grid-template-columns:1fr} }
+@media print{ .rp-plan .d{color:#6B6D76} .rp-plan p{margin-bottom:6pt} }
+
+/* ---- intro shown once per browser session, before the app ---- */
+#intro{position:fixed;inset:0;z-index:60;display:grid;place-items:center;background:#F7F5F0;color:#16171B;transition:transform .7s cubic-bezier(.76,0,.24,1),border-radius .7s cubic-bezier(.76,0,.24,1);will-change:transform;cursor:pointer;-webkit-user-select:none;user-select:none}
+.no-intro #intro{display:none}
+#intro.out{transform:translateY(-100%);border-radius:0 0 56px 56px;pointer-events:none}
+#intro *{animation-play-state:paused}
+#intro.go *{animation-play-state:running}
+.in-box{display:grid;justify-items:center;text-align:center;padding:24px}
+.in-buddy{width:clamp(130px,22vw,176px);height:auto;opacity:0;transform:scale(.55);animation:in-pop .55s cubic-bezier(.34,1.56,.64,1) forwards}
+.in-mark path{fill:none;stroke:#fff;stroke-width:3.2;stroke-linecap:round;stroke-linejoin:round;stroke-dasharray:1;stroke-dashoffset:1;animation:in-draw .45s .4s ease-out forwards}
+.in-word{position:relative;overflow:hidden;margin:14px 0 0;font-size:clamp(36px,6.4vw,58px);font-weight:600;letter-spacing:-.025em;line-height:1.15;padding:0 2px}
+/* One moving piece: a colour bar with a solid cover riding behind it, so the bar leaves the word behind as it passes. */
+.in-word i{position:absolute;top:0;bottom:0;left:-36px;width:calc(100% + 36px);display:flex;animation:in-wipe 1s .55s cubic-bezier(.76,0,.24,1) forwards}
+.in-word i::before{content:"";flex:none;width:36px;background:linear-gradient(90deg,#812FDF,#F65D8C)}
+.in-word i::after{content:"";flex:1;background:#F7F5F0}
+.in-tag{margin:12px 0 0;font-size:clamp(15px,2.2vw,18.5px);color:#6B6D76;opacity:0;transform:translateY(10px);animation:in-up .5s 1.15s ease-out forwards}
+.in-line{margin-top:28px;width:min(250px,60vw);height:4px;border-radius:99px;background:rgba(22,23,27,.08);overflow:hidden}
+.in-line i{display:block;height:100%;border-radius:99px;background:linear-gradient(90deg,#812FDF,#F65D8C 55%,#FCD61C);transform:scaleX(0);transform-origin:left;animation:in-fill 1.25s 1s cubic-bezier(.65,0,.35,1) forwards}
+.in-by{position:absolute;bottom:30px;left:50%;width:132px;height:auto;margin-left:-66px;opacity:0;transform:translateY(10px);animation:in-up .5s 1.3s ease-out forwards}
+@keyframes in-pop{to{opacity:1;transform:none}}
+@keyframes in-draw{to{stroke-dashoffset:0}}
+@keyframes in-wipe{to{transform:translateX(100%)}}
+@keyframes in-up{to{opacity:1;transform:none}}
+@keyframes in-fill{to{transform:none}}
+@media print{ #intro{display:none!important} }
+
+/* =====================================================================================================
+   Look, round two: warm light surfaces, a light sidebar, hairline cards, black pill buttons, one dark
+   score card and pastel tiles in the MYSense colours. Written as overrides so the first look stays above.
+   ===================================================================================================== */
+:root{
+  --bg:#ECEAE4; --shell:#F7F5F0; --panel:transparent; --card:#FFFFFF; --line:#E8E5DD; --soft:#F3F1EA;
+  --ink:#16171B; --ink2:#55575E; --muted:#93959D;
+  --side:transparent; --side-ink:#5E6068; --side-line:#E8E5DD; --hit:#F1ECFB;
+  --tint-1:#EFE8FC; --tint-2:#FDE9EF; --tint-3:#DDF3F6; --tint-4:#FDF3C6;
+  --dark:#16171B; --dark-ink:#FFFFFF; --dark-ink2:#A9ABB4; --dark-line:#2E3037;
+  --warn-soft:#FCEFD9; --on-ink:#FFFFFF;
+}
+:root[data-theme="dark"]{
+  /* Three clear steps so every card can be seen: a near-black page, a dark shell, and cards a good step lighter
+     with a visible edge. Inner tiles are lighter again. */
+  --bg:#07070A; --shell:#101016; --panel:transparent; --card:#1E1E2A; --line:#3A3A4C; --soft:#2B2B3A;
+  --ink:#F5F5F8; --ink2:#CDCED8; --muted:#9799A8;
+  --side:transparent; --side-ink:#A3A6B0; --side-line:#3A3A4C; --hit:#34295A;
+  --tint-1:#352B63; --tint-2:#50283B; --tint-3:#1A444B; --tint-4:#4C421D;
+  --dark:#2C1F57; --dark-ink:#FFFFFF; --dark-ink2:#C6BEE6; --dark-line:#47397F;
+  --primary-soft:#352B63; --primary-soft2:#42367E; --good-soft:#163F2E; --bad-soft:#522823; --warn-soft:#4F3712; --on-ink:#16171B;
+}
+.shell{border-radius:36px;box-shadow:0 0 0 1px var(--line),0 40px 90px -60px rgba(50,40,20,.45)}
+
+/* sidebar: light, with a soft pill on the page you are on */
+.side{background:transparent;border-right:1px solid var(--line);padding:30px 16px 22px;gap:24px}
+.brand{color:var(--ink);padding:0 10px;font-size:20px}
+#nav button{padding:11px 14px;font-size:15px;border-radius:14px}
+#nav button:hover{color:var(--ink);background:var(--soft)}
+#nav button.on{background:var(--card);color:var(--ink);box-shadow:0 0 0 1px var(--line),0 8px 18px -12px rgba(20,20,30,.35)}
+#nav button.on svg{color:var(--primary)}
+#nav button:disabled:hover{background:none;color:var(--side-ink)}
+.side-user b{color:var(--ink)}
+.side-user select{background:var(--soft);color:var(--ink)}
+.by{align-self:flex-start;padding:0 10px}
+.by img.by-light{width:124px;height:auto;border-radius:0}
+.by img.by-dark{display:none;width:96px;height:96px;border-radius:16px}
+:root[data-theme="dark"] .by img.by-light{display:none}
+:root[data-theme="dark"] .by img.by-dark{display:block}
+
+/* main area */
+.main{padding:28px 30px 30px}
+.panel{background:none;border-radius:0;padding:0}
+.top{padding:4px 150px 20px 2px;min-height:44px}
+.crumb{font-size:24px}
+.themebtn{top:30px;right:30px;height:36px;padding:0 14px;font-size:13.5px}
+
+/* cards, buttons, fields */
+.card{border-radius:26px;box-shadow:0 0 0 1px var(--line)}
+.btn{border-radius:999px;min-height:44px}
+.btn.primary{background:var(--ink);color:var(--on-ink)}
+.btn.primary:hover{filter:none;background:color-mix(in srgb,var(--ink) 82%,var(--primary))}
+.btn.soft{background:var(--card);color:var(--ink);box-shadow:inset 0 0 0 1px var(--line)}
+.btn.soft:hover{background:var(--soft)}
+.field{background:var(--card);border-radius:999px;box-shadow:inset 0 0 0 1px var(--line);padding:0 18px}
+.field:focus-within{box-shadow:0 0 0 2px var(--primary)}
+.pill,.pill.soft,.tools .pill{background:var(--card);border-radius:999px;box-shadow:inset 0 0 0 1px var(--line)}
+.link{color:var(--primary)}
+.chip{background:var(--tint-1);color:var(--ink)}
+.chip.start{background:var(--ink);color:var(--on-ink)}
+.note{background:var(--soft)}
+.step.run .ic{border-color:var(--tint-1);border-top-color:var(--primary)}
+
+/* overview as separate tiles: site, a dark score card, the chart, then the summary */
+.hero3{background:none;box-shadow:none;gap:16px}
+.hero3>.col{background:var(--card);border-radius:26px;box-shadow:0 0 0 1px var(--line);padding:28px}
+.hero3>.col+.col{border-left:0;border-top:0}
+.hero3>.col:nth-child(2){background:var(--dark);color:var(--dark-ink);box-shadow:none}
+.hero3>.col:nth-child(2) .label,.hero3>.col:nth-child(2) .health span,.hero3>.col:nth-child(2) .prev,.hero3>.col:nth-child(2) .row b small{color:var(--dark-ink2)}
+.hero3>.col:nth-child(2) .row{border-color:var(--dark-line)}
+.health b{font-size:66px}
+.shot.empty{background:var(--tint-1)}
+.summary{display:flex;gap:18px;align-items:flex-start;background:var(--card);border-radius:26px;box-shadow:0 0 0 1px var(--line);border-top:0;padding:22px 26px}
+.summary-text{min-width:0;flex:1}
+.marked{background:linear-gradient(transparent 60%,color-mix(in srgb,var(--pink) 42%,transparent) 60% 94%,transparent 94%);padding:0 2px}
+
+/* pastel tiles */
+.sofar .tiles>div:nth-child(1),.idea-grid>div:nth-child(4n+1),.plan .job:nth-child(4n+1),.steps3>div:nth-child(1),.vs2>div:nth-child(1){background:var(--tint-1)}
+.sofar .tiles>div:nth-child(2),.idea-grid>div:nth-child(4n+2),.plan .job:nth-child(4n+2),.steps3>div:nth-child(2){background:var(--tint-3)}
+.sofar .tiles>div:nth-child(3),.idea-grid>div:nth-child(4n+3),.plan .job:nth-child(4n+3),.steps3>div:nth-child(3){background:var(--tint-4)}
+.idea-grid>div:nth-child(4n+4),.plan .job:nth-child(4n+4),.vs2>div:nth-child(2){background:var(--tint-2)}
+.job .chip,.steps3 .chip{background:var(--card)}
+.job .chip.start{background:var(--ink)}
+.area h4{color:var(--ink)}
+.aibox{background:var(--tint-1)}
+
+/* status pills in tables */
+td .imp{padding:3px 11px 3px 9px;border-radius:999px;background:var(--soft);font-size:13.5px;font-weight:500}
+td .imp:has(.dot.good){background:var(--good-soft);color:var(--good)}
+td .imp:has(.dot.bad){background:var(--bad-soft);color:var(--bad)}
+td .imp:has(.dot.warn){background:var(--warn-soft);color:var(--warn)}
+td .imp .dot{width:7px;height:7px}
+
+/* the mascot */
+.mascot{display:block;flex:none;line-height:0}
+.mascot img{display:block;width:100%;height:auto}
+.mascot.xl{width:236px} .mascot.lg{width:168px} .mascot.md{width:104px} .mascot.sm{width:84px}
+.mascot.blob{padding:22px;border-radius:50%;background:#EFE8FC}
+.start.hasbuddy{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:32px;align-items:center}
+.start-main{min-width:0}
+.faster-head{display:flex;align-items:center;gap:18px}
+.faster-head h4{margin-bottom:4px}
+.summary .mascot{margin:-2px 0 -6px}
+.card.peek{position:relative}
+.card.peek>.mascot{position:absolute;right:30px;top:-44px}
+.card.peek .card-head{padding-right:110px}
+.emptybox{display:grid;justify-items:center;padding:40px 20px}
+.emptybox .empty{padding:18px 0 0}
+/* the mascot's arms and legs are dark navy, so on a dark card it stands on a light disc */
+:root[data-theme="dark"] .mascot:not(.blob){padding:8px;border-radius:26px;background:#EFE8FC}
+:root[data-theme="dark"] .card.peek>.mascot{top:-52px}
+
+@media (max-width:1100px){ .top{padding-right:140px} }
+@media (max-width:820px){
+  .side{border-right:0;border-bottom:1px solid var(--line)}
+  .main{padding:18px 14px 20px}
+  .top{padding-right:122px}
+  .themebtn{top:20px;right:14px}
+  .start.hasbuddy{grid-template-columns:1fr}
+  .start.hasbuddy>.mascot{display:none}
+  .card.peek>.mascot{display:none}
+  .card.peek .card-head{padding-right:0}
+  .summary{padding:18px 20px}
+  .summary .mascot{width:72px}
+  .hero3>.col{padding:22px 20px}
+}
+@media print{ .mascot{display:none!important} }
+
+/* =====================================================================================================
+   Sidebar, round three: a purple menu attached to the left wall with flowing curved edges. It follows the
+   page as you scroll. The account sits in its own curved piece and stays at the bottom.
+   ===================================================================================================== */
+:root{ --pod:#812FDF; --pod-ink:#fff; --pod-soft:rgba(255,255,255,.14); --pod-line:rgba(255,255,255,.2); --foot:#EFE8FC; }
+:root[data-theme="dark"]{ --pod:#6C27C2; --foot:#2A2250; }
+.shell{overflow:clip}                         /* clip keeps the rounded corners without stopping the menu from sticking */
+.side{display:flex;flex-direction:column;gap:0;padding:0;border-right:0;background:none}
+.side-rail{flex:1;padding:46px 0 30px}
+.pod{position:sticky;top:18px;display:flex;flex-direction:column;max-height:calc(100vh - 36px);color:var(--pod-ink)}
+.pod-head{position:relative;flex:none;width:250px;padding:22px 20px 20px 24px;background:var(--pod);border-radius:0 44px 34px 0}
+.pod-body{position:relative;flex:0 1 auto;min-height:0;display:flex;width:222px;padding:6px 14px 20px 14px;background:var(--pod);border-radius:0 0 40px 0}
+/* the curves: where the menu leaves the wall (top and bottom) and where the wide top narrows into the list */
+.pod-head::before,.pod-body::after,.pod-body::before,.side-user::before{content:"";position:absolute;width:28px;height:28px;pointer-events:none}
+.pod-head::before{left:0;top:-28px;background:radial-gradient(circle at 100% 0,transparent 27.5px,var(--pod) 28px)}
+.pod-body::after{left:0;bottom:-28px;background:radial-gradient(circle at 100% 100%,transparent 27.5px,var(--pod) 28px)}
+.pod-body::before{left:100%;top:0;background:radial-gradient(circle at 100% 100%,transparent 27.5px,var(--pod) 28px)}
+.pod .brand{color:var(--pod-ink);padding:0;font-size:20.5px}
+.pod #nav{flex:1;min-height:0;overflow-y:auto;scrollbar-width:none;gap:3px}
+.pod #nav::-webkit-scrollbar{display:none}
+.pod #nav button{color:rgba(255,255,255,.86);padding:10px 14px;border-radius:14px;font-size:15px}
+.pod #nav button:hover{color:#fff;background:var(--pod-soft)}
+.pod #nav button.on{background:#fff;color:#16171B;box-shadow:0 8px 18px -10px rgba(20,10,60,.55)}
+.pod #nav button.on svg{color:#812FDF}
+.pod #nav button:disabled{opacity:.42}
+.pod #nav button:disabled:hover{background:none;color:rgba(255,255,255,.86)}
+.pod #nav button:focus-visible{outline-color:#fff}
+.pod #nav hr{border-top-color:var(--pod-line);margin:12px 12px}
+.side-foot{flex:none}
+.by{align-self:auto;display:block;padding:0 0 16px 26px}
+.side-user{position:relative;width:238px;padding:18px 16px 22px 24px;border-top:0;border-radius:0 36px 0 0;background:var(--foot)}
+.side-user::before{left:0;top:-28px;background:radial-gradient(circle at 100% 0,transparent 27.5px,var(--foot) 28px)}
+
+/* the marker really underlines the words: the line in the picture carries on under the heading */
+.summary{display:block}
+.short-head{display:flex;align-items:flex-end;--mw:138px;--mh:calc(var(--mw) * .8558)}
+.short-head .mascot{width:var(--mw);margin:0}
+.card .short-title{display:block;position:relative;margin:0 0 0 calc(var(--mw) * -.285);padding:0 16px calc(var(--mh) * .03 + 7px) 0;font-size:25px;font-weight:600;letter-spacing:-.015em;line-height:1.1;white-space:nowrap}
+.short-title::after{content:"";position:absolute;left:calc(var(--mw) * -.05);right:0;bottom:calc(var(--mh) * .004);height:calc(var(--mh) * .026);min-height:3px;border-radius:0 99px 99px 0;background:#FD5C8E}
+.summary-text{margin-top:16px}
+
+/* the mascot stands on the card itself now; in dark mode a soft light edge keeps its dark arms and legs visible */
+.mascot.blob{padding:0;border-radius:0;background:none}
+.mascot.xl{width:214px}
+:root[data-theme="dark"] .mascot:not(.blob){padding:0;border-radius:0;background:none}
+:root[data-theme="dark"] .mascot img,:root[data-theme="dark"] .in-buddy{filter:drop-shadow(0 0 1px rgba(255,255,255,.8)) drop-shadow(0 0 1px rgba(255,255,255,.8)) drop-shadow(0 0 7px rgba(255,255,255,.16))}
+:root[data-theme="dark"] .card.peek>.mascot{top:-44px}
+
+@media (max-width:820px){
+  .side{display:block;border-bottom:0}
+  .side-rail{padding:0}
+  .pod{position:static;max-height:none}
+  .pod-head{width:100%;border-radius:0;padding:16px 18px 6px}
+  .pod-body{width:100%;border-radius:0 0 26px 26px;padding:6px 10px 14px}
+  .pod-head::before,.pod-body::before,.pod-body::after,.side-user::before{display:none}
+  .pod #nav{flex-direction:row;overflow-x:auto;overflow-y:hidden}
+  .pod #nav hr{display:none}
+  .by{display:none}
+  .side-user{width:auto;border-radius:0;background:none;padding:12px 18px 0}
+  .short-head{--mw:112px}
+  .card .short-title{font-size:21px}
+}
+
+/* dark mode: buttons, fields and pills that sit on a card get the lighter inner tone so they stand out from it */
+:root[data-theme="dark"] .btn.soft,:root[data-theme="dark"] .field,:root[data-theme="dark"] .pill,:root[data-theme="dark"] .pill.soft,:root[data-theme="dark"] .tools .pill{background:var(--soft)}
+:root[data-theme="dark"] .btn.soft:hover{background:var(--primary-soft2)}
+:root[data-theme="dark"] .card,:root[data-theme="dark"] .hero3>.col,:root[data-theme="dark"] .summary{box-shadow:0 0 0 1px var(--line),0 18px 40px -28px rgba(0,0,0,.9)}
+:root[data-theme="dark"] .hero3{box-shadow:none}
+:root[data-theme="dark"] .hero3>.col:nth-child(2){box-shadow:0 0 0 1px var(--dark-line),0 18px 40px -28px rgba(0,0,0,.9)}
+:root[data-theme="dark"] .job .chip,:root[data-theme="dark"] .steps3 .chip{background:rgba(255,255,255,.12);color:var(--ink)}
+:root[data-theme="dark"] .chip{color:var(--ink)}
+:root[data-theme="dark"] .sheet{box-shadow:0 0 0 1px var(--line),0 30px 80px rgba(0,0,0,.6)}

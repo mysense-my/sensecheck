@@ -287,6 +287,57 @@ export function whyOf(r) {
   return out;
 }
 
+// How to make the site faster: the few jobs that would move the speed score most, in the order we'd do them.
+// Each job is picked from where the weight and the waiting actually go on this page (Google's test on a phone),
+// so the advice fits the site instead of being a generic checklist. Returns null when speed was not measured.
+export function speedPlan(r) {
+  const m = ok(r.psi.mobile);
+  if (!m) return null;
+  const p = m.scores.performance, w = m.why || {}, b = w.bytes || {}, st = r.stack || {}, kind = st.platform ? st.platform.kind : '', wp = kind === 'wordpress';
+  if (p != null && p >= 90) return { fast: true, score: p, lead: 'It already loads quickly on phones, so there’s nothing to fix here. We’d just test it again after any big change.', steps: [], note: '' };
+  const mb = k => (k >= 1024 ? (k / 1024).toFixed(1) + ' MB' : Math.round(k) + ' KB');
+  const met = id => m.metrics.find(x => x.id === id) || {}, tbt = met('total-blocking-time'), cls = met('cumulative-layout-shift'), fcp = met('first-contentful-paint');
+  const win = re => (m.wins || []).filter(x => re.test(x.id)), saved = re => win(re).reduce((t, x) => t + x.saving, 0);
+  const steps = [];
+  // rank: the time Google says the job could save, then the size of the thing it deals with
+  const add = (title, why, how, effort, ms, size) => steps.push({ title, why, how, effort, gain: ms >= 300 ? `This alone could save about ${(ms / 1000).toFixed(1)} seconds on phones.` : '', rank: ms + (size || 0) / 10 });
+  if (win(/image|lcp-discovery/).length || b.image > 800 || (b.total && b.image > 400 && b.image / b.total >= 0.4))
+    add('Make the pictures lighter', b.image ? `Pictures make up ${mb(b.image)} of the ${mb(b.total)} page.` : 'Google’s test says the pictures are bigger than they need to be.',
+      'We’d resize each picture to the size it’s shown at, save it in a lighter format (WebP), and load the ones further down only when people scroll to them.', 'Quick win', saved(/image|lcp-discovery/), b.image);
+  if (w.ttfb > 600 || win(/document-latency/).length)
+    add('Get the server to answer faster', w.ttfb ? `The server takes ${(w.ttfb / 1000).toFixed(1)} seconds before it sends anything. Under 0.6 seconds is healthy.` : 'The server is slow to send the first part of the page.',
+      wp ? 'We’d switch on page caching, so the server hands out a ready-made copy instead of rebuilding the page for every visitor. If it’s still slow after that, the hosting itself needs an upgrade.'
+        : 'We’d add caching and a content delivery network, so pages are handed out from a ready-made copy close to the visitor. If it’s still slow after that, the hosting needs an upgrade.', 'Medium job', Math.max(saved(/document-latency/), (w.ttfb || 0) - 600), 0);
+  if (b.script > 500 || (tbt.score != null && tbt.score < 50) || w.unusedJs > 150 || win(/javascript|bootup|mainthread|duplicated|legacy/).length)
+    add('Cut down the code the page loads', `${b.script ? `There’s ${mb(b.script)} of code in ${b.scripts} files.` : 'The page loads more code than it needs.'}${w.unusedJs > 150 ? ` About ${mb(w.unusedJs)} of it is never used on this page.` : ''}${tbt.score != null && tbt.score < 50 ? ` It keeps a phone busy for ${tbt.display}.` : ''}`,
+      wp ? 'We’d remove plugins nobody uses, load each plugin’s code only on the pages that need it, and let the rest wait until the page is on screen.'
+        : 'We’d remove code that isn’t used, split the rest so each page loads only what it needs, and let it wait until the page is on screen.', 'Medium job', saved(/javascript|bootup|mainthread|duplicated|legacy/), b.script);
+  if (win(/render-blocking/).length || (fcp.score != null && fcp.score < 50))
+    add('Show something on screen sooner', fcp.display ? `Right now the screen stays blank for ${fcp.display} on a phone, because styles and scripts have to finish loading first.` : 'Styles and scripts hold the page back before anything appears.',
+      'We’d load the styling the first screen needs straight away and let everything else follow, so people see the page while the rest arrives.', 'Quick win', saved(/render-blocking/), b.css);
+  if ((b.thirdHosts >= 5 && b.thirdKb > 300) || win(/third-part/).length)
+    add('Hold back the outside services', b.thirdKb ? `${mb(b.thirdKb)} comes from ${b.thirdHosts} other companies’ servers, such as trackers, chat boxes and embedded videos or maps.` : 'Outside services such as trackers and chat boxes slow the page down.',
+      'We’d load them only after the page is usable, swap heavy embeds for a picture that loads the real thing on a click, and drop the ones nobody looks at.', 'Quick win', saved(/third-part/), b.thirdKb);
+  if (b.font > 150 || win(/font-display/).length)
+    add('Trim the fonts', `${b.font ? `Fonts add ${mb(b.font)}.` : 'The fonts load in a slow way.'}${win(/font-display/).length ? ' The text also stays invisible until they arrive.' : ''}`,
+      'We’d keep one or two font families, serve them from the site itself, and show the text straight away while they load.', 'Quick win', saved(/font-display/), b.font);
+  if (cls.value > 0.1 || win(/cls-culprits/).length)
+    add('Stop things jumping around', `The page shifts as it loads (a score of ${cls.display}, and Google wants 0.1 or less), which drags the speed score down too.`,
+      'We’d give every image, banner and embed a fixed space, so nothing moves once it appears.', 'Quick win', saved(/cls-culprits/), 200);
+  if (b.media > 1000)
+    add('Don’t load the video until it’s wanted', `Video adds ${mb(b.media)} before anyone presses play.`, 'We’d show a still picture first and load the video only when someone plays it.', 'Quick win', 0, b.media);
+  if (win(/cache-insight/).length)
+    add('Let browsers keep what they’ve already downloaded', 'Returning visitors download the same pictures, styles and scripts all over again.', 'We’d tell browsers to keep those files, so a second visit loads almost instantly.', 'Quick win', saved(/cache-insight/), 100);
+  if (win(/dom-size|forced-reflow/).length)
+    add('Simplify how the page is built', 'The page has far more layers and boxes than it needs, which is common with page builders and old templates. Every one of them is more work for the phone.', 'We’d rebuild the heaviest sections with a cleaner layout.', 'Bigger job', saved(/dom-size|forced-reflow/), 50);
+  if (!steps.length) add('Give the page a general speed tune-up', 'No single thing stands out, so the gain comes from a lot of small ones.', 'We’d go through images, code, caching and hosting one by one, and test again after each change.', 'Medium job', 0, 0);
+  steps.sort((x, y) => y.rank - x.rank);
+  return { fast: false, score: p,
+    lead: p < 50 ? 'It’s slow on phones right now, but it’s fixable. These are the jobs that would make the biggest difference, in the order we’d do them.' : 'It’s not far off. These would get it into the green, in the order we’d do them.',
+    steps: steps.slice(0, 5).map(({ rank, ...x }) => x),
+    note: kind === 'closed' ? `On ${st.platform.name}, how far the speed can be tuned is limited by the platform itself. A rebuild on WordPress gives the most room.` : '' };
+}
+
 // Health Score out of 100 with a sub-score per category. Unmeasured categories are left out, not guessed.
 export function healthOf(r) {
   const pen = c => Math.max(0, 100 - r.issues.filter(i => i.cat === c).reduce((t, i) => t + costOf(i), 0));

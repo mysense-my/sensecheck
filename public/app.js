@@ -1,6 +1,6 @@
 import { tr } from './bm.js';
 import { detectStack, summarisePsi, diagnose, dnsClues, vulnsFor } from './analyze.js';
-import { readPage, buildIssues, healthOf, strengthsOf, skillsFit, nextSteps, verdictOf, whyOf, ideasOf, designOf as designVerdict, norm, CATS, CAT_NAME } from './audit.js';
+import { readPage, buildIssues, healthOf, strengthsOf, skillsFit, nextSteps, verdictOf, whyOf, ideasOf, speedPlan, designOf as designVerdict, norm, CATS, CAT_NAME } from './audit.js';
 
 const CFG = await fetch('config.json').then(r => r.json());
 // Who is signed in. The real Worker fills this from the Cloudflare Access login; the local stand-in pretends.
@@ -30,8 +30,10 @@ const I = {
   spark: '<path d="M12 4l1.9 5.1L19 11l-5.1 1.9L12 18l-1.9-5.1L5 11l5.1-1.9z"/>',
 };
 const icon = n => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${I[n]}</svg>`;
+// The SenseCheck mascot. Poses: wave, point, inspect, underline, thumbs, clipboard, run, shrug, coffee.
+const mascot = (pose, size = 'md', extra = '') => `<span class="mascot ${size} ${extra}" aria-hidden="true"><img src="img/mascot/${pose}.webp" alt="" decoding="async"></span>`;
 const hd = (ic, colour) => `<span class="ic ${colour}">${icon(ic)}</span>`; // coloured icon chip for a section title
-const LOGO = '<svg viewBox="0 0 32 32" width="22" height="22"><rect width="32" height="32" rx="10" fill="#812FDF"/><path d="M9 16.5l4.5 4.5L23 11.5" fill="none" stroke="#fff" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+const LOGO = '<svg viewBox="0 0 64 64" width="22" height="22"><rect width="64" height="64" rx="19" fill="#812FDF"/><circle cx="23.5" cy="24" r="5.2" fill="#FCD61C"/><circle cx="40.5" cy="24" r="5.2" fill="#F65D8C"/><path d="M21.5 38.5l8 8L43 32" fill="none" stroke="#fff" stroke-width="6.2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
 const fmt = iso => new Date(iso).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
 const good = p => (p && !p.error ? p : null);
 const tone = v => (v == null ? 'info' : v >= 90 ? 'good' : v >= 50 ? 'warn' : 'bad');
@@ -55,7 +57,7 @@ const sum = r => ({ id: r.id, by: r.by, domain: r.domain, date: r.date, health: 
 const strip = r => { const cut = p => (p && !p.error ? { ...p, shot: '', full: '' } : p); return { ...r, psi: { mobile: cut(r.psi.mobile), desktop: cut(r.psi.desktop) } }; };
 // Scans are kept for a limited time (historyHours in config.json), then removed automatically.
 const KEEP_HOURS = +CFG.historyHours || 24, KEEP_MS = KEEP_HOURS * 3600000;
-const local = { all() { try { const all = JSON.parse(localStorage.getItem(KEY)) || [], fresh = all.filter(x => Date.now() - Date.parse(x.date) < KEEP_MS); if (fresh.length !== all.length) localStorage.setItem(KEY, JSON.stringify(fresh)); return fresh; } catch { return []; } }, save(l) { try { localStorage.setItem(KEY, JSON.stringify(l.slice(0, 30))); } catch { /* storage unavailable */ } } };
+const local = { all() { try { const all = JSON.parse(localStorage.getItem(KEY)) || [], fresh = all.filter(x => Date.now() - Date.parse(x.date) < KEEP_MS); if (fresh.length !== all.length) localStorage.setItem(KEY, JSON.stringify(fresh)); return fresh; } catch { return []; } }, save(l) { for (let n = Math.min(l.length, 30); n >= 0; n = n > 1 ? Math.floor(n / 2) : n - 1) { try { localStorage.setItem(KEY, JSON.stringify(l.slice(0, n))); return; } catch { /* storage is full or unavailable: try again with fewer scans */ } } } };
 const call = (path, opt) => fetch(path, opt).then(locked).then(r => (r.ok ? r.json() : Promise.reject(new Error('Could not reach the saved scans.'))));
 const H = {
   server: !!ME.store, rows: [],
@@ -284,6 +286,21 @@ async function vulnProbes(stack, probes) {
   (await pool(jobs, 3, j => soft(j[1]))).forEach((x, i) => { const v = vulnsFor(body(x), jobs[i][2], jobs[i][3]); if (v) probes.vulns[jobs[i][0]] = v; });
 }
 
+// A small copy of a screenshot. The full ones are too big to keep, so these are saved with the scan and the real
+// website still shows when the scan is reopened from History or printed later.
+async function thumbOf(src, maxW) {
+  if (!src) return '';
+  try {
+    const img = new Image(); img.src = src; await img.decode();
+    const k = Math.min(1, maxW / img.naturalWidth), c = document.createElement('canvas');
+    c.width = Math.round(img.naturalWidth * k); c.height = Math.round(img.naturalHeight * k);
+    const x = c.getContext('2d'); x.fillStyle = '#fff'; x.fillRect(0, 0, c.width, c.height); x.drawImage(img, 0, 0, c.width, c.height);
+    return c.toDataURL('image/jpeg', 0.8);
+  } catch { return ''; }
+}
+// The screenshots to show: the full ones while they are still in memory, otherwise the saved small copies.
+const shotsOf = r => { const m = good(r.psi.mobile), d = good(r.psi.desktop), t = r.thumbs || {}; return { d: (d && d.shot) || t.d || '', m: (m && m.shot) || t.m || '' }; };
+
 // The main colours on the first screen, read from Google's screenshot. Shown as plain swatches, with no judgement.
 async function paletteOf(src) {
   if (!src) return [];
@@ -406,6 +423,7 @@ async function runScan(raw, opt = {}) {
   const r = { id: Date.now(), url: page.finalUrl || u.href, domain, date: new Date().toISOString(), blocked, read, stack, psi: { mobile, desktop }, pages, broken, bigImages, site };
   r.issues = buildIssues(r, CFG); r.health = healthOf(r); r.strengths = strengthsOf(r); r.design = designVerdict(r); r.why = whyOf(r); r.ideas = ideasOf(r);
   r.cover = cover; r.palette = await paletteOf((good(desktop) || {}).shot || (good(mobile) || {}).shot);
+  r.thumbs = { d: await thumbOf((good(desktop) || {}).shot, 640), m: await thumbOf((good(mobile) || {}).shot, 240) };
   r.fit = skillsFit(stack, CFG); r.steps = nextSteps(r, CFG); r.verdict = verdictOf(r);
   r.pagesChecked = pages.length; r.pagesSkipped = skipped;
   for (const k of ['pages', 'broken', 'bigImages', 'site']) delete r[k];
@@ -426,8 +444,8 @@ function drawNav() {
   const b = (go, ic, label, on, dis) => `<button type="button" data-go="${go}" class="${on ? 'on' : ''}"${dis ? ' disabled' : ''}>${icon(ic)}${label}</button>`;
   nav.innerHTML = b('new', 'plus', 'New scan', S.route === 'new' || S.route === 'scan')
     + b('overview', 'grid', 'Overview', res && S.sec === 'overview', none)
-    + b('speed', 'gauge', 'Page speed', res && S.sec === 'speed', none)
     + (S.result && S.result.vs ? b('compare', 'versus', 'Competitor', res && S.sec === 'compare') : '')
+    + b('speed', 'gauge', 'Page speed', res && S.sec === 'speed', none)
     + b('design', 'layout', 'Design', res && S.sec === 'design', none)
     + b('stack', 'layers', 'Tech stack', res && S.sec === 'stack', none)
     + b('findings', 'list', 'Findings', res && S.sec === 'findings', none)
@@ -454,7 +472,7 @@ function renderNew() {
   const rows = H.rows.slice(0, 5);
   view.innerHTML = `
     <div class="top"><div class="crumb">SenseCheck<i>&rsaquo;</i><b>New scan</b></div></div>
-    <div class="card start">
+    <div class="card start hasbuddy"><div class="start-main">
       <h1>Check a client\u2019s website</h1>
       <p>Paste the link and we\u2019ll go through the whole website: what it runs on, whether we can take it on, what needs fixing and what to propose.</p>
       <form class="urlrow" id="f" novalidate>
@@ -462,7 +480,7 @@ function renderNew() {
         <button class="btn primary" type="submit">Run check</button>
       </form>
       <div class="covers"><span><i class="dot m"></i>Tech stack and versions</span><span><i class="dot d"></i>Speed, SEO, content and security</span><span><i class="dot c3"></i>Strengths and next steps</span></div>
-    </div>
+    </div>${mascot('wave', 'xl', 'blob')}</div>
     ${rows.length ? historyCard(rows, H.server ? 'My recent scans' : 'Recent scans') : ''}`;
   const u = $('#u'); if (u && window.matchMedia('(min-width: 821px)').matches) u.focus();
 }
@@ -471,17 +489,17 @@ function renderHistory() {
   const rows = H.rows, all = S.who === 'all' && ME.admin;
   view.innerHTML = `<div class="top"><div class="crumb">SenseCheck<i>&rsaquo;</i><b>History</b></div></div>
     ${rows.length || ME.admin ? historyCard(rows, all ? 'Everyone\u2019s scans' : H.server ? 'My scans' : 'Past scans on this browser', all) : ''}
-    ${rows.length ? '' : '<div class="card"><p class="empty">No scans yet. Run your first check from New scan.</p></div>'}`;
+    ${rows.length ? '' : `<div class="card emptybox">${mascot('coffee', 'lg', 'blob')}<p class="empty">No scans yet. Run your first check from New scan.</p></div>`}`;
 }
 
 function renderScan(domain, vsFor) {
   SOFAR = {};
   view.innerHTML = `<div class="top"><div class="crumb">Scans<i>&rsaquo;</i><b>${esc(domain)}</b></div></div>
-    <div class="card start"><h1>Checking ${esc(domain)}</h1>
+    <div class="card start hasbuddy"><div class="start-main"><h1>Checking ${esc(domain)}</h1>
     <p>${vsFor ? `This is the competitor for ${esc(vsFor.domain)}. ` : ''}We check the homepage and the main pages around it, two at a time so we don\u2019t slow the website down. Blog posts are left out because they all share one layout. Keep this tab open until it finishes.</p>
     <div class="steps">${[['site', 'Reading the site'], ['stack', 'Identifying the tech stack'], ['pages', 'Checking pages'], ['m', 'Measuring mobile speed'], ['d', 'Measuring desktop speed']].map(([id, t]) => `<div class="step" id="st-${id}"><span class="ic"></span><span>${t}</span><small></small></div>`).join('')}</div>
     <div class="prog" id="prog" hidden><div class="bar"><i id="progbar"></i></div><p id="progtext"></p><div id="progask"></div></div>
-    <div class="sofar" id="sofar" hidden></div></div>`;
+    <div class="sofar" id="sofar" hidden></div></div>${mascot('inspect', 'xl', 'blob')}</div>`;
 }
 
 // Early results, shown while the rest of the scan is still running, so nobody stares at a blank screen.
@@ -532,9 +550,9 @@ function step(id, st, note) {
 function renderFail(domain, d) {
   S.route = 'new'; drawNav();
   view.innerHTML = `<div class="top"><div class="crumb">Scans<i>&rsaquo;</i><b>${esc(domain)}</b></div></div>
-    <div class="card start"><h1>Could not check ${esc(domain)}</h1>
+    <div class="card start hasbuddy"><div class="start-main"><h1>Could not check ${esc(domain)}</h1>
     <p><b>${esc(d.title)}.</b> ${esc(d.why)}</p><p style="margin-top:12px"><b>What to do:</b> ${esc(d.next)}</p>
-    <div class="urlrow"><button class="btn primary" type="button" data-go="new">Try another link</button></div></div>`;
+    <div class="urlrow"><button class="btn primary" type="button" data-go="new">Try another link</button></div></div>${mascot('shrug', 'xl', 'blob')}</div>`;
 }
 
 // Notice shown when the site was blocked or only partly readable, with the specific reason.
@@ -551,6 +569,15 @@ function budgetHtml(r) {
   return used.length ? `<p class="budget"><b>Rough budget guide (internal):</b> ${used.map(p => `${esc(p)} ${esc(priceOf(p))}`).join(' \u00b7 ')}. These are starting prices, so confirm the scope before you quote.</p>` : '';
 }
 
+// "How to make it faster": the jobs that would move the speed score most, most useful first.
+function fasterHtml(r) {
+  const f = speedPlan(r);
+  if (!f) return '';
+  return `<div class="faster"><div class="faster-head">${mascot(f.fast ? 'thumbs' : 'point', 'md')}<div><h4>How to make it faster</h4><p class="ink2">${esc(f.lead)}</p></div></div>
+    ${f.steps.length ? `<div class="plan">${f.steps.map((x, i) => `<div class="job"><div class="job-head"><b>${esc(x.title)}</b>${i === 0 ? '<span class="chip start">Start here</span>' : ''}<span class="chip">${esc(x.effort)}</span></div><p>${esc(x.why)}</p><p class="fix">${esc(x.how)}</p>${x.gain ? `<p class="gain">${esc(x.gain)}</p>` : ''}</div>`).join('')}</div>` : ''}
+    ${f.note ? `<p class="muted small" style="margin-top:12px">${esc(f.note)}</p>` : ''}</div>`;
+}
+
 // Design advice grouped by area: what we saw, why it matters and what we would do.
 const AREAS = ['First impression', 'Fonts and colours', 'Photos and visuals', 'Layout and navigation', 'Trust and getting in touch', 'On phones', 'Under the hood'];
 const areaOf = x => (AREAS.includes(x.area) ? x.area : 'Under the hood');
@@ -562,7 +589,7 @@ const speedGroups = (m, d) => (m || d).metrics.map((x, i) => ({ short: x.short, 
 const designOf = r => r.design || { tone: 'info', label: 'Not checked in this scan', note: 'Scan again to run the design checks.' };
 
 function renderResult() {
-  const r = S.result, m = good(r.psi.mobile), d = good(r.psi.desktop), any = m || d, v = r.stack.verdict, h = r.health, dz = designOf(r);
+  const r = S.result, m = good(r.psi.mobile), d = good(r.psi.desktop), any = m || d, v = r.stack.verdict, h = r.health, dz = designOf(r), sh = shotsOf(r);
   const perr = (r.psi.mobile && r.psi.mobile.error) || (r.psi.desktop && r.psi.desktop.error) || '';
   const f = (m && m.field) || (d && d.field), fr = x => ({ FAST: 'good', AVERAGE: 'warn', SLOW: 'bad' }[x && x.rating] || 'info');
   const groups = [...new Set(r.stack.items.map(i => i.group))], looks = r.issues.filter(i => i.cat === 'Design');
@@ -577,7 +604,7 @@ function renderResult() {
     ${readNote(r)}
     <div class="card hero3" id="sec-overview">
       <div class="col who">
-        ${(d && d.shot) || (m && m.shot) ? `<div class="shots">${d && d.shot ? `<img src="${esc(d.shot)}" alt="Desktop screenshot of ${esc(r.domain)}">` : ''}${m && m.shot ? `<img src="${esc(m.shot)}" alt="Mobile screenshot of ${esc(r.domain)}">` : ''}</div>` : `<div class="shot empty">${esc(r.domain[0].toUpperCase())}</div>`}
+        ${sh.d || sh.m ? `<div class="shots">${sh.d ? `<img src="${esc(sh.d)}" alt="Desktop screenshot of ${esc(r.domain)}">` : ''}${sh.m ? `<img src="${esc(sh.m)}" alt="Mobile screenshot of ${esc(r.domain)}">` : ''}</div>` : `<div class="shot empty">${esc(r.domain[0].toUpperCase())}</div>`}
         <h2>${esc(r.domain)}</h2>
         <p class="tone ${r.verdict.tone}">${esc(r.verdict.label)}</p>
         <button class="btn primary" type="button" data-go="pdf-client">${icon('down')}Client PDF</button>
@@ -596,8 +623,8 @@ function renderResult() {
         <span class="label">Google Lighthouse, out of 100</span>
         ${any ? '<div class="chart" id="chart-scores"></div>' : `<p class="note" style="margin-top:16px">Speed test unavailable. ${esc(perr)}</p>`}
       </div>
-      <div class="summary"><p><b>In short:</b> ${esc(r.verdict.summary)}${r.cover ? '' : ` <span class="muted">${r.pagesChecked ? `${r.pagesChecked} ${r.pagesChecked === 1 ? 'page' : 'pages'} checked.` : ''}</span>`}</p>
-        ${r.cover && r.cover.length ? `<div class="cover"><span class="label">Which pages we checked, and why</span>${reasons(r.cover)}</div>` : ''}</div>
+      <div class="summary"><div class="short-head">${mascot('underline', 'pen')}<h3 class="short-title">In short</h3></div><div class="summary-text"><p>${esc(r.verdict.summary)}${r.cover ? '' : ` <span class="muted">${r.pagesChecked ? `${r.pagesChecked} ${r.pagesChecked === 1 ? 'page' : 'pages'} checked.` : ''}</span>`}</p>
+        ${r.cover && r.cover.length ? `<div class="cover"><span class="label">Which pages we checked, and why</span>${reasons(r.cover)}</div>` : ''}</div></div>
     </div>
 
     ${compareHtml(r)}
@@ -619,7 +646,8 @@ function renderResult() {
         <div class="field-data">${f && f.lcp ? `<span><b>Real visitors</b>&nbsp;on Chrome, last 28 days${f.origin ? ' (whole site)' : ''}</span>
           <span><i class="dot ${fr(f.lcp)}"></i>Main content (LCP) <b>${(f.lcp.value / 1000).toFixed(1)} s</b></span>
           ${f.inp ? `<span><i class="dot ${fr(f.inp)}"></i>Responsiveness (INP) <b>${f.inp.value} ms</b></span>` : ''}
-          ${f.cls ? `<span><i class="dot ${fr(f.cls)}"></i>Layout shift (CLS) <b>${(f.cls.value / 100).toFixed(2)}</b></span>` : ''}` : '<span>Google has no real-visitor data for this site yet, which usually means low traffic.</span>'}</div>` : `<p class="note">No speed data. ${esc(perr)}</p>`}
+          ${f.cls ? `<span><i class="dot ${fr(f.cls)}"></i>Layout shift (CLS) <b>${(f.cls.value / 100).toFixed(2)}</b></span>` : ''}` : '<span>Google has no real-visitor data for this site yet, which usually means low traffic.</span>'}</div>
+        ${fasterHtml(r)}` : `<p class="note">No speed data. ${esc(perr)}</p>`}
     </div>
 
     <div class="card" id="sec-design">
@@ -646,7 +674,7 @@ function renderResult() {
       </div>
     </div>
 
-    <div class="card" id="sec-strengths">
+    <div class="card peek" id="sec-strengths">${mascot('thumbs', 'sm')}
       <div class="card-head"><h3>${hd('check', 'yellow')}What is working well</h3><span class="muted">Keep these in any revamp</span></div>
       ${r.strengths.length ? `<ul class="goodlist">${r.strengths.map(x => `<li><i class="dot good"></i><span>${esc(x)}</span></li>`).join('')}</ul>` : '<p class="note">Nothing stood out as a strength on the things we can measure.</p>'}
     </div>
@@ -895,7 +923,7 @@ function buildReport(mode, o = {}) {
   const groupNames = bm ? [['quick', 'Pembaikan pantas'], ['revamp', 'Kerja rombakan'], ['maintenance', 'Penyelenggaraan berterusan']] : GROUPS;
   const vs = r.vs ? versus(r) : null, vsList = (xs, extra) => { const all = [...xs.map(x => vsLine(x, T)), ...(extra ? [extra] : [])]; return all.length ? reasons(all) : `<p>${W('Nothing clearly ahead.', 'Tiada yang jelas mendahului.')}</p>`; };
   const vsSpeed = vs && vs.lcp ? W(`On phones, the main content shows up in ${vs.lcp.x} on ${r.domain} and ${vs.lcp.y} on ${r.vs.domain}`, `Di telefon, kandungan utama muncul dalam ${vs.lcp.x} di ${r.domain} dan ${vs.lcp.y} di ${r.vs.domain}`) : '';
-  const looks = r.issues.filter(i => i.cat === 'Design');
+  const looks = r.issues.filter(i => i.cat === 'Design'), faster = speedPlan(r), sh = shotsOf(r);
   $('#report').innerHTML = `
     <section class="rp-cover">
       <div class="rp-band"></div>
@@ -914,7 +942,7 @@ function buildReport(mode, o = {}) {
     ${r.read ? `<div class="rp-box" style="margin-top:12pt"><h3>${W(r.read.level === 'blocked' ? 'Part of this report is limited' : 'A note on this report', 'Nota tentang laporan ini')}</h3>${bm ? '<p>Sebahagian laman web ini tidak dapat dibaca sepenuhnya oleh alat semakan kami, jadi beberapa bahagian laporan ini terhad.</p>' : `<p><b>${esc(r.read.title)}.</b> ${esc(r.read.why)}</p>`}${int ? `<p><b>What to do:</b> ${esc(r.read.next)}</p>` : ''}</div>` : ''}
     ${int ? `<div class="rp-box" style="margin-top:12pt"><h3>Can we take it? ${dotted(r.fit.tone, r.fit.verdict)}</h3>${reasons(r.fit.reasons)}</div>` : ''}
     <div class="rp-top">
-      ${(d && d.shot) || (m && m.shot) ? `<div class="shots">${d && d.shot ? `<img src="${esc(d.shot)}" alt="">` : ''}${m && m.shot ? `<img src="${esc(m.shot)}" alt="">` : ''}</div>` : ''}
+      ${sh.d || sh.m ? `<div class="shots">${sh.d ? `<img src="${esc(sh.d)}" alt="">` : ''}${sh.m ? `<img src="${esc(sh.m)}" alt="">` : ''}</div>` : ''}
       <div class="scores"><table><thead><tr><th>${W('Website health', 'Kesihatan laman web')}</th><th>${W('Score out of 100', 'Skor daripada 100')}</th></tr></thead><tbody>
         <tr><td><b>${W('Overall', 'Keseluruhan')}</b></td><td><b>${cell(h.score, htone)}</b></td></tr>
         ${CATS.map(c => `<tr><td>${T(CAT_NAME[c])}</td><td>${h.sub[c] == null ? W('Not measured', 'Tidak diukur') : cell(h.sub[c], htone)}</td></tr>`).join('')}
@@ -938,6 +966,10 @@ function buildReport(mode, o = {}) {
       ${(m || d).metrics.map((x, i) => `<tr><td>${T(x.name)} <span class="d">(${x.short})</span></td><td>${m ? dotted(tone(m.metrics[i].score), esc(m.metrics[i].display)) : '–'}</td><td>${d ? dotted(tone(d.metrics[i].score), esc(d.metrics[i].display)) : '–'}</td></tr>`).join('')}
     </tbody></table>` : `<p>${W('The speed test could not be completed for this site.', 'Ujian kelajuan tidak dapat disiapkan untuk laman ini.')}</p>`}
     ${m && m.field && m.field.lcp ? `<p class="rp-sum">${W(`Real visitors on Chrome over the last 28 days: main content appears in ${(m.field.lcp.value / 1000).toFixed(1)} s${m.field.overall ? `, rated ${{ FAST: 'fast', AVERAGE: 'average', SLOW: 'slow' }[m.field.overall] || 'unrated'} overall` : ''}.`, `Pelawat sebenar di Chrome dalam 28 hari lepas: kandungan utama muncul dalam ${(m.field.lcp.value / 1000).toFixed(1)} s${m.field.overall ? `, dinilai ${{ FAST: 'pantas', AVERAGE: 'sederhana', SLOW: 'perlahan' }[m.field.overall] || 'belum dinilai'} secara keseluruhan` : ''}.`)}</p>` : ''}
+
+    ${faster ? `<h2>${W('How to make it faster', 'Cara menjadikannya lebih pantas')}</h2><p class="rp-sum">${esc(T(faster.lead))}</p>
+      ${faster.steps.length ? `<div class="rp-area rp-plan">${faster.steps.map((x, i) => `<p><b>${esc(T(x.title))}</b> <span class="d">(${esc([i === 0 ? T('Start here') : '', T(x.effort)].filter(Boolean).join(', '))})</span><br>${esc(T(x.why))} <i>${esc(T(x.how))}</i>${x.gain ? ` ${esc(T(x.gain))}` : ''}</p>`).join('')}</div>` : ''}
+      ${faster.note ? `<p class="rp-note">${esc(T(faster.note))}</p>` : ''}` : ''}
 
     <h2>${W('Design', 'Reka bentuk')}</h2>
     <div class="rp-box"><h3>${dotted(dz.tone, esc(T(dz.label)))}</h3><p>${esc(int ? dz.note : W('This comes from our checks for design that looks dated or broken.', 'Ini berdasarkan semakan kami terhadap reka bentuk yang nampak ketinggalan zaman atau rosak.'))}</p>
@@ -997,10 +1029,24 @@ function go(to) {
   if (S.busy) return toast('A scan is still running.');
   if (to === 'new' || to === 'history') { S.route = to; render(); window.scrollTo(0, 0); return; }
   if (!S.result) return;
-  const was = S.route; S.route = 'result'; S.sec = to;
+  const was = S.route; S.route = 'result'; S.sec = to; spyHold = Date.now() + 900;
   if (was !== 'result') render(); else drawNav();
   const el = $('#sec-' + to); if (el) el.scrollIntoView({ behavior: 'smooth', block: to === 'overview' ? 'center' : 'start' });
 }
+
+// The menu follows the page (it is sticky in the styles) and marks the section you are reading.
+const SPY = ['overview', 'speed', 'compare', 'design', 'stack', 'findings', 'steps'];
+let spyHold = 0, spyWait = 0;
+function spy() {
+  spyWait = 0;
+  if (S.route !== 'result' || Date.now() < spyHold) return;
+  // the section whose top most recently passed the top of the window, whatever order the sections are in
+  let cur = SPY[0], best = -Infinity;
+  for (const id of SPY) { const el = $('#sec-' + id), top = el ? el.getBoundingClientRect().top : NaN; if (top <= 160 && top > best) { best = top; cur = id; } }
+  if (window.innerHeight + window.scrollY >= document.documentElement.scrollHeight - 4) cur = 'steps';
+  if (cur !== S.sec) { S.sec = cur; drawNav(); }
+}
+window.addEventListener('scroll', () => { if (!spyWait) spyWait = setTimeout(spy, 70); }, { passive: true });
 
 document.addEventListener('click', e => {
   const t = e.target.closest('[data-go],[data-open],[data-remove],[data-rescan],[data-act],#more');

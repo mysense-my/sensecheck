@@ -128,29 +128,31 @@ function lockPage(status, message, form) {
 <meta name="robots" content="noindex,nofollow"><title>SenseCheck</title>
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600&display=swap" rel="stylesheet">
-<style>*{box-sizing:border-box}body{margin:0;min-height:100vh;display:grid;place-items:center;padding:16px;background:#E8EFF7;color:#17181C;font:400 15.5px/1.5 Outfit,system-ui,sans-serif}
-.wrap{display:grid;grid-template-columns:minmax(0,1.15fr) minmax(0,1fr);width:100%;max-width:880px;background:#fff;border-radius:28px;overflow:hidden;box-shadow:0 30px 80px -40px rgba(40,60,110,.35)}
-.intro{background:#141838;color:#fff;padding:44px 40px}
-.by{display:block;width:112px;height:112px;margin-top:30px;border-radius:16px}
+<style>*{box-sizing:border-box}body{margin:0;min-height:100vh;display:grid;place-items:center;padding:16px;background:#ECEAE4;color:#16171B;font:400 15.5px/1.5 Outfit,system-ui,sans-serif}
+.wrap{display:grid;grid-template-columns:minmax(0,1.15fr) minmax(0,1fr);width:100%;max-width:880px;background:#fff;border-radius:28px;overflow:hidden;box-shadow:0 0 0 1px #E8E5DD,0 40px 90px -60px rgba(50,40,20,.45)}
+.intro{position:relative;background:#EFE8FC;color:#16171B;padding:44px 40px 40px;overflow:hidden}
+.by{display:block;width:132px;height:auto;margin-top:96px}
+.buddy{position:absolute;right:26px;bottom:22px;width:136px;height:auto}
 .brand{display:flex;align-items:center;gap:10px;font-weight:600;font-size:19px}
 h1{margin:30px 0 12px;font-size:28px;line-height:1.2;font-weight:600;letter-spacing:-.02em;text-wrap:balance}
-.intro p{margin:0;color:#B9BBC4}
+.intro p{margin:0;color:#55575E}
 ul{list-style:none;margin:26px 0 0;padding:0;display:grid;gap:14px}
-li{display:flex;gap:12px;color:#E6E7EC;text-wrap:balance}
+li{display:flex;gap:12px;color:#2B2C31;text-wrap:balance}
 li::before{content:"";flex:none;width:20px;height:20px;margin-top:2px;border-radius:50%;background:#812FDF url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20'%3E%3Cpath d='M5.5 10.3l3 3 6-6.3' fill='none' stroke='%23fff' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") center/20px no-repeat}
 .gate{padding:44px 40px;display:flex;flex-direction:column;justify-content:center}
 h2{margin:0 0 6px;font-size:22px;font-weight:600;letter-spacing:-.01em}.gate p{margin:0;color:#5F616A}
 form{margin-top:22px;display:grid;gap:12px}label{font-size:13.5px;font-weight:500;color:#5F616A}
-input{width:100%;height:50px;border:0;border-radius:14px;background:#F4F4FA;padding:0 16px;font:inherit;outline:0}input:focus{box-shadow:0 0 0 2px #812FDF}
-button{height:48px;border:0;border-radius:14px;background:#812FDF;color:#fff;font:500 15px Outfit,system-ui,sans-serif;cursor:pointer}button:hover{filter:brightness(1.08)}
+input{width:100%;height:50px;border:0;border-radius:999px;background:#fff;box-shadow:inset 0 0 0 1px #E3E0D8;padding:0 20px;font:inherit;outline:0}input:focus{box-shadow:0 0 0 2px #812FDF}
+button{height:48px;border:0;border-radius:999px;background:#16171B;color:#fff;font:500 15px Outfit,system-ui,sans-serif;cursor:pointer}button:hover{background:#2B2140}
 .err{color:#C7321F!important;font-weight:500;margin-top:14px!important}
-@media (max-width:720px){.wrap{grid-template-columns:minmax(0,1fr)}.intro,.gate{padding:28px 24px}h1{font-size:24px;margin-top:22px}}</style></head><body><main class="wrap">
+@media (max-width:720px){.wrap{grid-template-columns:minmax(0,1fr)}.intro,.gate{padding:28px 24px}h1{font-size:24px;margin-top:22px}.buddy{width:96px;right:16px;bottom:14px}}</style></head><body><main class="wrap">
 <section class="intro">
-<div class="brand"><svg viewBox="0 0 32 32" width="30" height="30" aria-hidden="true"><rect width="32" height="32" rx="10" fill="#812FDF"/><path d="M9 16.5l4.5 4.5L23 11.5" fill="none" stroke="#fff" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"/></svg>SenseCheck</div>
+<div class="brand"><svg viewBox="0 0 64 64" width="32" height="32" aria-hidden="true"><rect width="64" height="64" rx="19" fill="#812FDF"/><circle cx="23.5" cy="24" r="5.2" fill="#FCD61C"/><circle cx="40.5" cy="24" r="5.2" fill="#F65D8C"/><path d="M21.5 38.5l8 8L43 32" fill="none" stroke="#fff" stroke-width="6.2" stroke-linecap="round" stroke-linejoin="round"/></svg>SenseCheck</div>
 <h1>Pitching a client but not sure what their website needs?</h1>
 <p>Paste their link. We go through the whole website and tell you, in plain words, what\u2019s wrong and what to propose.</p>
 <ul><li>Site health: speed, SEO, design and security</li><li>What it is built on, and if we can take it on</li><li>What to recommend, in a PDF for the client</li></ul>
-<img class="by" src="/img/mysense-dark.png" alt="MYSense. With us, everything makes sense" width="112" height="112">
+<img class="by" src="/img/mysense-light.png" alt="MYSense. With us, everything makes sense" width="447" height="141">
+<img class="buddy" src="/img/mascot/wave.webp" alt="" width="520" height="485">
 </section>
 <section class="gate">
 ${form ? `<h2>Enter the team passcode</h2><p>This tool is for the MYSense team.</p>${message ? `<p class="err" role="alert">${message}</p>` : ''}
@@ -277,8 +279,8 @@ async function designReview(request, env) {
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
-    // The MYSense logo files are the only thing served without signing in (the login screen shows one).
-    if (/^\/img\/mysense-(light|dark)\.png$/.test(url.pathname)) return env.ASSETS.fetch(request);
+    // The pictures the login screen shows are the only things served without signing in.
+    if (/^\/img\/(mysense-(light|dark)\.png|mascot\/wave\.webp)$/.test(url.pathname)) return env.ASSETS.fetch(request);
     const api = url.pathname.startsWith('/api/');
     let me = { email: null, admin: false };
     if (env.ACCESS_TEAM && env.ACCESS_AUD) {
