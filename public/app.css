@@ -779,3 +779,6 @@ td.empty .mascot{margin:0 auto 10px}
 @media (max-width:820px){ .buddy{right:10px;bottom:8px} .buddy-face{width:60px} .buddy.away .buddy-face{transform:translateY(52%)} }
 @media (prefers-reduced-motion:reduce){ .buddy-face img,.runner{animation:none} }
 @media print{ .buddy{display:none!important} }
+
+/* a picture from a half-loaded Google test is kept on screen, with a word of warning under it */
+.shotnote{margin:-4px 0 10px;font-size:12.5px;line-height:1.35;color:var(--warn);text-align:center}

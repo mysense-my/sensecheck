@@ -329,7 +329,14 @@ export function summarisePsi(j) {
   const why = { bytes, ttfb: num('server-response-time'), unusedJs: saveKb('unused-javascript'), unusedCss: saveKb('unused-css-rules') };
   const design = { contrast: cnt('color-contrast'), taps: cnt('target-size'), stretched: cnt('image-aspect-ratio'), blurry: cnt('image-size-responsive') };
   const fps = lh.fullPageScreenshot && lh.fullPageScreenshot.screenshot;
-  return { urls, why, design, scores, metrics, wins, field, full: (fps && fps.data) || '', shot: (A['final-screenshot'] && A['final-screenshot'].details && A['final-screenshot'].details.data) || '', packs: (lh.stackPacks || []).map(p => p.title), weight: A['total-byte-weight'] && A['total-byte-weight'].numericValue ? Math.round(A['total-byte-weight'].numericValue / 1024) : null };
+  // Did Google's test get the whole page? If the styling fails to load, or a good share of the site's own files,
+  // or the test itself says it gave up, then the picture and the scores describe a half-loaded page.
+  const own = x => { try { return !!host0 && new URL(x.url).hostname.endsWith(host0); } catch { return false; } };
+  const lost = reqs.filter(x => /Stylesheet|Script|Image|Font|Document/.test(x.resourceType || '') && (x.statusCode >= 400 || x.statusCode === -1 || (x.finished === false && /Stylesheet|Document/.test(x.resourceType))));
+  const lostCss = lost.filter(x => x.resourceType === 'Stylesheet').length, mine = reqs.filter(own).length, lostOwn = lost.filter(own).length;
+  const warned = (lh.runWarnings || []).some(w => /too slowly|incomplete|time limit|timed out|not finish|unable to/i.test(w));
+  const partial = lostCss || warned || (lostOwn >= 4 && lostOwn / Math.max(1, mine) >= 0.25) ? { files: lost.length, css: lostCss, warned } : null;
+  return { partial, urls, why, design, scores, metrics, wins, field, full: (fps && fps.data) || '', shot: (A['final-screenshot'] && A['final-screenshot'].details && A['final-screenshot'].details.data) || '', packs: (lh.stackPacks || []).map(p => p.title), weight: A['total-byte-weight'] && A['total-byte-weight'].numericValue ? Math.round(A['total-byte-weight'].numericValue / 1024) : null };
 }
 
 // ---------- Why a site could not be read, in specific terms. Returns null when the page was read normally.

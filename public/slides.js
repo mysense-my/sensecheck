@@ -204,7 +204,12 @@ export async function makeSlides(r, mode, o, k) {
       cell(m, i, x + w - 3.1, y); cell(d, i, x + w - 1.6, y);
     });
     const f = m && m.field && m.field.lcp ? m.field : null;
-    text(s, f ? M(`Real visitors on Chrome, last 28 days: main content appears in ${(f.lcp.value / 1000).toFixed(1)} s.`, `Pelawat sebenar di Chrome, 28 hari lepas: kandungan utama muncul dalam ${(f.lcp.value / 1000).toFixed(1)} s.`) : M('Google has no real-visitor data for this site yet, which usually means low traffic.', 'Google belum ada data pelawat sebenar untuk laman ini, biasanya kerana trafik rendah.'), { x: x + 0.3, y: 6.0, w: w - 0.6, h: 0.45, fontSize: 10.5, color: C.ink2, valign: 'middle' });
+    if (k.trouble) { // the internal note says more, so it gets a taller box
+      const nh = int ? 1.15 : 0.75, ny = 6.47 - nh;
+      box(s, x + 0.2, ny, w - 0.4, nh, C.t4, null, 0.12);
+      text(s, fit(int ? k.trouble.why : M(k.trouble.client[0], k.trouble.client[1]), w - 0.8, nh - 0.2, 10), { x: x + 0.38, y: ny + 0.08, w: w - 0.76, h: nh - 0.16, fontSize: 10, color: C.ink, valign: 'middle' });
+    }
+    else text(s, f ? M(`Real visitors on Chrome, last 28 days: main content appears in ${(f.lcp.value / 1000).toFixed(1)} s.`, `Pelawat sebenar di Chrome, 28 hari lepas: kandungan utama muncul dalam ${(f.lcp.value / 1000).toFixed(1)} s.`) : M('Google has no real-visitor data for this site yet, which usually means low traffic.', 'Google belum ada data pelawat sebenar untuk laman ini, biasanya kerana trafik rendah.'), { x: x + 0.3, y: 6.0, w: w - 0.6, h: 0.45, fontSize: 10.5, color: C.ink2, valign: 'middle' });
   }
 
   // ---- 6. how to make it faster

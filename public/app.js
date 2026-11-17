@@ -105,6 +105,24 @@ async function psi(url, strategy) {
   return s;
 }
 
+// One speed test for one device. If Google's test fails or only half-loads the page, it is tried once more and
+// the better of the two is kept, so a single bad run does not decide a client's score. A result that is still
+// half-loaded keeps its "partial" note and is flagged on screen and in the reports.
+async function speedTest(url, st) {
+  let a = null, err = null;
+  try { a = await psi(url, st); } catch (e) { err = e; }
+  if (a && !a.partial) return a;
+  if (err && /quota/i.test(err.message)) throw err;
+  step(st[0], 'run', 'Trying again');
+  await sleep(2500);
+  let b = null;
+  try { b = await psi(url, st); } catch (e) { if (!a) throw err || e; }
+  if (b && !b.partial) return b;
+  const best = a && b ? (b.scores.performance > a.scores.performance ? b : a) : a || b;
+  best.retried = true;
+  return best;
+}
+
 // Registrar and expiry from public RDAP records. Many country domains do not publish these.
 async function domainInfo(host) {
   if (/^[\d.]+$/.test(host)) return null;
@@ -301,7 +319,35 @@ async function thumbOf(src, maxW) {
   } catch { return ''; }
 }
 // The screenshots to show: the full ones while they are still in memory, otherwise the saved small copies.
-const shotsOf = r => { const m = good(r.psi.mobile), d = good(r.psi.desktop), t = r.thumbs || {}; return { d: (d && d.shot) || t.d || '', m: (m && m.shot) || t.m || '' }; };
+// With clean set (client reports), a picture from a half-loaded test is left out.
+const shotsOf = (r, clean) => {
+  const m = good(r.psi.mobile), d = good(r.psi.desktop), t = r.thumbs || {}, bad = testTrouble(r), off = k => !!bad && bad.suspect.includes(k);
+  return { d: clean && off('desktop') ? '' : (d && d.shot) || t.d || '', m: clean && off('mobile') ? '' : (m && m.shot) || t.m || '', note: off('mobile') || off('desktop') };
+};
+// Which devices Google's test failed on (none) or only half-loaded (half). "suspect" lists the devices whose
+// picture should not be trusted. Scans saved before this check existed carry no "partial" note, so there a test
+// that ran next to one that failed outright is treated as suspect too.
+function testTrouble(r) {
+  const NAME = { mobile: 'phones', desktop: 'computers' }, half = [], none = [], suspect = [];
+  const failed = k => !!(r.psi[k] && r.psi[k].error && /could not load/i.test(r.psi[k].error));
+  for (const k of ['mobile', 'desktop']) {
+    const p = r.psi[k], other = k === 'mobile' ? 'desktop' : 'mobile';
+    if (failed(k)) none.push(NAME[k]);
+    else if (good(p) && (p.partial || (p.partial === undefined && failed(other)))) { suspect.push(k); if (p.partial) half.push(NAME[k]); }
+  }
+  if (none.length === 2 || (!half.length && !none.length)) return null;
+  return { half, none, suspect, retried: ['mobile', 'desktop'].some(k => r.psi[k] && r.psi[k].retried) };
+}
+// The same thing in words, for the notice on screen, and a one-line version for the client report (two languages).
+function testNote(r) {
+  const t = testTrouble(r); if (!t) return null;
+  const and = l => l.join(' and '), bits = [];
+  if (t.half.length) bits.push(`Google\u2019s speed test only half-loaded this site on ${and(t.half)}. Some of its files, such as the styling or the pictures, didn\u2019t arrive${t.retried ? ', even on a second try' : ''}.`);
+  if (t.none.length) bits.push(`Google couldn\u2019t load the site ${t.half.length ? '' : 'at all '}on ${and(t.none)}${t.half.length ? ' at all' : ''}.`);
+  return { title: 'Google\u2019s test didn\u2019t load this site properly', why: `${bits.join(' ')} So the screenshot may look broken and the speed scores are probably lower than the real ones.`,
+    next: 'Scan again in a few minutes. If it keeps happening, the site may be failing for some real visitors too, which is worth raising with the client.',
+    client: ['Google\u2019s speed test could not load this site fully during this check, so the speed scores here may be lower than the real ones.', 'Ujian kelajuan Google tidak dapat memuatkan laman ini sepenuhnya semasa semakan ini, jadi skor kelajuan di sini mungkin lebih rendah daripada yang sebenar.'] };
+}
 
 // The main colours on the first screen, read from Google's screenshot. Shown as plain swatches, with no judgement.
 async function paletteOf(src) {
@@ -335,7 +381,7 @@ async function runScan(raw, opt = {}) {
   if (vsFor && vsFor.domain === domain) return toast('That is the same website. Paste a competitor’s link.');
   S.busy = true; S.route = 'scan'; drawNav(); renderScan(domain, vsFor);
   ['site', 'm', 'd'].forEach(id => step(id, 'run'));
-  const speed = st => psi(u.href, st).then(v => (step(st[0], 'done'), sofar({ [st]: v.scores.performance }), v), e => (step(st[0], 'fail', e.message), { error: e.message }));
+  const speed = st => speedTest(u.href, st).then(v => (step(st[0], 'done', v.partial ? 'Only partly loaded' : ''), sofar({ [st]: v.scores.performance }), v), e => (step(st[0], 'fail', e.message), { error: e.message }));
   const pm = speed('mobile'), pd = speed('desktop');
 
   let page = null, err = '';
@@ -610,7 +656,7 @@ const speedGroups = (m, d) => (m || d).metrics.map((x, i) => ({ short: x.short, 
 const designOf = r => r.design || { tone: 'info', label: 'Not checked in this scan', note: 'Scan again to run the design checks.' };
 
 function renderResult() {
-  const r = S.result, m = good(r.psi.mobile), d = good(r.psi.desktop), any = m || d, v = r.stack.verdict, h = r.health, dz = designOf(r), sh = shotsOf(r);
+  const r = S.result, m = good(r.psi.mobile), d = good(r.psi.desktop), any = m || d, v = r.stack.verdict, h = r.health, dz = designOf(r), sh = shotsOf(r), tn = testNote(r);
   const perr = (r.psi.mobile && r.psi.mobile.error) || (r.psi.desktop && r.psi.desktop.error) || '';
   const f = (m && m.field) || (d && d.field), fr = x => ({ FAST: 'good', AVERAGE: 'warn', SLOW: 'bad' }[x && x.rating] || 'info');
   const groups = [...new Set(r.stack.items.map(i => i.group))], looks = r.issues.filter(i => i.cat === 'Design');
@@ -623,9 +669,10 @@ function renderResult() {
     </div>
 
     ${readNote(r)}
+    ${tn ? `<div class="card notice"><h3>${esc(tn.title)}</h3><p>${esc(tn.why)}</p><p><b>What to do:</b> ${esc(tn.next)}</p></div>` : ''}
     <div class="card hero3" id="sec-overview">
       <div class="col who">
-        ${sh.d || sh.m ? `<div class="shots">${sh.d ? `<img src="${esc(sh.d)}" alt="Desktop screenshot of ${esc(r.domain)}">` : ''}${sh.m ? `<img src="${esc(sh.m)}" alt="Mobile screenshot of ${esc(r.domain)}">` : ''}</div>` : `<div class="shot empty">${esc(r.domain[0].toUpperCase())}</div>`}
+        ${sh.d || sh.m ? `<div class="shots">${sh.d ? `<img src="${esc(sh.d)}" alt="Desktop screenshot of ${esc(r.domain)}">` : ''}${sh.m ? `<img src="${esc(sh.m)}" alt="Mobile screenshot of ${esc(r.domain)}">` : ''}</div>${sh.note ? '<p class="shotnote">This is what Google\u2019s test saw. The page didn\u2019t load fully, so it may look broken.</p>' : ''}` : `<div class="shot empty">${esc(r.domain[0].toUpperCase())}</div>`}
         <h2>${esc(r.domain)}</h2>
         <p class="tone ${r.verdict.tone}">${esc(r.verdict.label)}</p>
         <button class="btn primary" type="button" data-go="pdf-client">${icon('down')}Client report</button>
@@ -953,7 +1000,7 @@ function buildReport(mode, o = {}) {
   const groupNames = bm ? [['quick', 'Pembaikan pantas'], ['revamp', 'Kerja rombakan'], ['maintenance', 'Penyelenggaraan berterusan']] : GROUPS;
   const vs = r.vs ? versus(r) : null, vsList = (xs, extra) => { const all = [...xs.map(x => vsLine(x, T)), ...(extra ? [extra] : [])]; return all.length ? reasons(all) : `<p>${W('Nothing clearly ahead.', 'Tiada yang jelas mendahului.')}</p>`; };
   const vsSpeed = vs && vs.lcp ? W(`On phones, the main content shows up in ${vs.lcp.x} on ${r.domain} and ${vs.lcp.y} on ${r.vs.domain}`, `Di telefon, kandungan utama muncul dalam ${vs.lcp.x} di ${r.domain} dan ${vs.lcp.y} di ${r.vs.domain}`) : '';
-  const looks = r.issues.filter(i => i.cat === 'Design'), faster = speedPlan(r), sh = shotsOf(r);
+  const looks = r.issues.filter(i => i.cat === 'Design'), faster = speedPlan(r), sh = shotsOf(r, !int), tn = testNote(r);
   $('#report').innerHTML = `
     <section class="rp-cover">
       <div class="rp-band"></div>
@@ -970,6 +1017,7 @@ function buildReport(mode, o = {}) {
     <p class="rp-verdict">${dotted(r.verdict.tone, esc(T(r.verdict.label)))}</p>
     <p class="rp-sum">${esc(T(r.verdict.summary))}</p>
     ${r.read ? `<div class="rp-box" style="margin-top:12pt"><h3>${W(r.read.level === 'blocked' ? 'Part of this report is limited' : 'A note on this report', 'Nota tentang laporan ini')}</h3>${bm ? '<p>Sebahagian laman web ini tidak dapat dibaca sepenuhnya oleh alat semakan kami, jadi beberapa bahagian laporan ini terhad.</p>' : `<p><b>${esc(r.read.title)}.</b> ${esc(r.read.why)}</p>`}${int ? `<p><b>What to do:</b> ${esc(r.read.next)}</p>` : ''}</div>` : ''}
+    ${tn ? `<div class="rp-box" style="margin-top:12pt"><h3>${int ? esc(tn.title) : W('A note on the speed results', 'Nota tentang keputusan kelajuan')}</h3><p>${esc(int ? tn.why : W(tn.client[0], tn.client[1]))}</p>${int ? `<p><b>What to do:</b> ${esc(tn.next)}</p>` : ''}</div>` : ''}
     ${int ? `<div class="rp-box" style="margin-top:12pt"><h3>Can we take it? ${dotted(r.fit.tone, r.fit.verdict)}</h3>${reasons(r.fit.reasons)}</div>` : ''}
     <div class="rp-top">
       ${sh.d || sh.m ? `<div class="shots">${sh.d ? `<img src="${esc(sh.d)}" alt="">` : ''}${sh.m ? `<img src="${esc(sh.m)}" alt="">` : ''}</div>` : ''}
@@ -1093,7 +1141,7 @@ async function saveSlides(mode, o = {}) {
   toast('Building the slides. This takes a few seconds.', 'run');
   try {
     const { makeSlides } = await import('./slides.js');
-    const blob = await makeSlides(S.result, mode, o, { shots: shotsOf(S.result), versus, areaOf, AREAS, priceOf, designOf, good, CFG });
+    const blob = await makeSlides(S.result, mode, o, { shots: shotsOf(S.result, mode !== 'internal'), trouble: testNote(S.result), versus, areaOf, AREAS, priceOf, designOf, good, CFG });
     download(blob, fileName(mode, o, 'pptx'));
     toast('Slides downloaded.', 'thumbs');
   } catch (e) { console.error(e); toast('The slides could not be made. Try the PDF.', 'shrug'); }
