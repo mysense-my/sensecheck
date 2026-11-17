@@ -1,7 +1,9 @@
 {
   "historyHours": 24,
   "crawl": {
-    "maxPages": 500,
+    "maxPages": 200,
+    "sectionLimit": 20,
+    "sectionSample": 3,
     "delayMs": 300,
     "maxImageChecks": 10,
     "maxPluginChecks": 8
@@ -27,6 +29,12 @@
     "speed": "Speed Optimisation",
     "seo": "SEO",
     "maintenance": "Maintenance Plan"
+  },
+  "prices": {
+    "revamp": "",
+    "speed": "",
+    "seo": "",
+    "maintenance": ""
   },
   "skills": {
     "WordPress": "expert",

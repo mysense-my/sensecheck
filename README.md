@@ -4,12 +4,15 @@ Internal MYSense tool. Paste one website link and get a single report: what the 
 
 ## User guide (account servicing)
 
-1. Open SenseCheck and paste the client's link. It checks every page it can find.
-2. Wait while it works. A progress bar shows how many pages there are and roughly how long is left. Pages are read slowly on purpose so the client's server is not loaded, and the tab has to stay open. At 500 pages it pauses and asks whether to keep going.
+1. Open SenseCheck and paste the client's link. It checks the homepage and the main pages around it.
+2. Wait while it works. A progress bar shows how many pages there are and roughly how long is left, and a "What we know so far" box fills in early results (what the site is built with, the speed scores, the first things noticed on the homepage). Pages are read slowly on purpose so the client's server is not loaded, and the tab has to stay open.
+   **Which pages get checked.** Blog posts are left out, because they all share one layout. A section with more than 20 pages (for example a long list of services) gets a sample of 3, and so do pages the homepage does not link to. The result says exactly what was left out and why, under "Which pages we checked, and why". At 200 pages it pauses and asks whether to keep going.
 3. Read the result top to bottom: Health Score, what's behind the scores, page speed (mobile and desktop side by side), design, tech stack, strengths, findings, next steps. The wording is deliberately plain and friendly so it can be read out to a client.
    The **Dark mode** switch at the top right changes the look for you only. PDFs always print light.
-   The **Design** verdict comes from rules that catch a dated or broken look (old layout code, sliders, low contrast, no call to action and so on). It cannot judge taste, so have a designer look before pitching a redesign.
-4. **Client PDF** is the version to share. **Internal PDF** adds the "Can we take it?" verdict, versions with confidence levels, and our package names. Do not send the internal one to clients.
+   The **Design** section groups its advice by area (first impression, fonts and colours, photos, layout, trust, phones). Each item says what we saw, why it matters and what we would do. "Ideas worth pitching" lists things the site does not have yet (video, FAQ, map and so on); these never affect the score. The verdict comes from rules that catch a dated or broken look. Rules cannot judge taste, so have a designer look before pitching a redesign, or use the AI design opinion if it is switched on (see below).
+   **Copy summary** gives a short message for WhatsApp or email, in English or Bahasa Malaysia, that you can edit before copying.
+   **Compare with a competitor** runs the same check on a competitor's link and puts the two side by side. The comparison is added to both PDFs.
+4. **Client PDF** is the version to share. **Internal PDF** adds the "Can we take it?" verdict, versions with confidence levels, our package names and the price guide. Do not send the internal one to clients. Both ask for an optional client name and your name for the cover page. The client PDF can be made in English or Bahasa Malaysia.
 5. **History** lists your own past scans. Once personal logins are live they are saved under your email, so you see the same list on any computer, and nobody else sees yours. Scans are removed automatically after 24 hours. Use **Remove** to delete one sooner. Scanning the same site again shows the previous Health Score for a before-and-after.
 6. Admins get a **Show: Everyone's scans** switch on the History page, with a "Scanned by" column.
 
@@ -27,10 +30,11 @@ Everything editable lives in `public/config.json`. Edit it on GitHub and the cha
 |---|---|
 | `skills` | The Skills Matrix. Each platform, builder or plugin is `expert`, `support` or `none`. Names must match what the Tech stack card shows. Anything not listed gives "Take with caution". |
 | `packages` | The service package name shown beside each recommendation. |
+| `prices` | An indicative starting price per package, for example `"revamp": "from RM 6,000"`. Shown beside the package name on screen and in the internal PDF only, never in the client PDF. Leave a price empty to show nothing. |
 | `historyHours` | How long a scan stays in History before it is removed automatically (default 24). Once personal logins are live, also set the Worker var `HISTORY_HOURS` to the same number. |
 | `placeholders` | Phrases treated as placeholder text (not case-sensitive). |
 | `thresholds` | `imageKB` oversized-image limit, `thinWords` for near-empty pages, `domainExpiryDays` warning window. |
-| `crawl` | `maxPages` safety limit where a scan pauses and asks before going on (default 500), `delayMs` pause between requests, `maxImageChecks`, `maxPluginChecks` (set to 0 to stop reading plugin readme files). |
+| `crawl` | `maxPages` safety limit where a scan pauses and asks before going on (default 200), `sectionLimit` how many pages a section may have before it is only sampled (default 20), `sectionSample` how many pages of a big section are checked (default 3), `delayMs` pause between requests, `maxImageChecks`, `maxPluginChecks` (set to 0 to stop reading plugin readme files). |
 
 Verdict logic: any `none` item gives **Not a fit**; any `support` or unlisted item gives **Take with caution**; all `expert` gives **Can take**.
 
@@ -66,14 +70,28 @@ The whole tool sits behind one shared team passcode, stored as the secret `PASSC
 - A browser stays unlocked for 30 days. Changing the passcode signs everyone out. Visiting `/logout` locks one browser.
 - The passcode is shared, so change it when someone leaves the team. For per-person logins, move to Cloudflare Access (needs a Zero Trust plan).
 
+## AI design opinion (optional, off until a key is added)
+
+The rule-based design checks cannot judge taste. With a Claude API key, a button appears in the Design section: "Ask AI about the design". It sends the screenshots Google took (desktop first screen and the phone page) to Claude and shows a short designer-style opinion, with a line to open the conversation with the client. It only runs when someone presses the button, and each press costs roughly 30 sen (about 6 US cents). The opinion is saved with the scan and printed in the internal PDF only.
+
+To switch it on: create an API key at console.anthropic.com (this is billed separately from a Claude chat subscription), then in Cloudflare open Workers & Pages, sensecheck, Settings, Variables and Secrets, and add a **Secret** named `ANTHROPIC_API_KEY`. Remove the secret to switch it off again. Optional variable `AI_MODEL` picks another Claude model (default `claude-opus-5-5`; `claude-sonnet-5-5` costs about half). If a safety filter declines a request, the API is allowed to pass it to another Claude model instead of failing.
+
+## Where the extra facts come from
+
+- **Known security holes**: the public WPVulnerability database (wpvulnerability.net, free, no key), looked up for WordPress, Elementor and each plugin whose version could be read and is behind. The same hole is often listed by several sources, so only distinct CVE numbers are counted and the wording is "at least N".
+- **Security certificate expiry**: public certificate logs through certspotter.com (free, no key). It flags a certificate that is unusually close to its end date.
+- **Elementor starter colours**: the site's own Elementor kit file is read to see whether the site-wide colours were ever changed.
+- **Bahasa Malaysia wording** lives in `public/bm.js`. When a line in `audit.js` or `analyze.js` is reworded, update its twin there. A line with no Malay twin simply stays in English.
+
 ## How it is put together
 
 - `public/` is the app (plain HTML, CSS and JS, no build step).
   - `analyze.js`: tech stack detection and PageSpeed parsing.
   - `audit.js`: page checks, issues and severities, Health Score, strengths, skills fit, next steps.
-  - `app.js`: scan flow, crawl, interface, chart and both PDF layouts.
+  - `app.js`: scan flow, crawl, interface, charts, the competitor comparison, the copy summary and both PDF layouts.
+  - `bm.js`: Bahasa Malaysia wording for the client PDF and the copy summary.
   - `config.json`: the admin-editable rules above.
-- `src/worker.js` is the Cloudflare Worker. It serves `public/` and two API routes: `/api/fetch` (reads a public page) and `/api/psi` (Google PageSpeed Insights).
+- `src/worker.js` is the Cloudflare Worker. It serves `public/` and the API routes: `/api/fetch` (reads a public page), `/api/psi` (Google PageSpeed Insights) and `/api/design-review` (the optional AI design opinion).
 - `schema.sql` creates the saved-scans table.
 - `dev.py` is a local stand-in for the Worker, for machines without Node.
 
@@ -93,7 +111,7 @@ Then open http://127.0.0.1:8788. The local stand-in has no passcode and no real 
 
 ## Not built yet (from the brief)
 
-SSL certificate issuer and expiry, known-vulnerability lookups (WPScan API), shareable report links, a side-by-side compare of two scans, and an admin screen for editing the rules in the browser.
+Shareable report links and an admin screen for editing the rules in the browser.
 
 ## Yearly upkeep
 

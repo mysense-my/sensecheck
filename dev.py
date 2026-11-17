@@ -14,6 +14,13 @@ STORE = os.path.join(HERE, '.local', 'scans.json')
 USERS = ['colleague.a@local.test', 'colleague.b@local.test', 'admin@local.test']
 ADMINS = ['admin@local.test']
 LOCK = threading.Lock()
+SAMPLE_REVIEW = {'impression': 'The first screen is busy: a rotating banner, three different fonts and a menu with a lot of items all compete for attention, so it is hard to tell what the business does.',
+                 'dated': 'dated',
+                 'points': [{'area': 'First screen', 'saw': 'The banner rotates through several messages and none of them says what the company offers.', 'do': "We'd replace it with one strong photo and a single clear line."},
+                            {'area': 'Colours', 'saw': 'Dark blue, bright red and green are all used for buttons, so nothing stands out as the main action.', 'do': "We'd pick one button colour and keep the rest calm."},
+                            {'area': 'Photos', 'saw': 'Most pictures are small and look like stock images.', 'do': "We'd use larger, real photos of the team and the work."},
+                            {'area': 'On phones', 'saw': 'The text is tight against the edges and the buttons sit close together.', 'do': "We'd give everything more breathing room on small screens."}],
+                 'pitch': 'Your site has all the right information, it just makes people work to find it. We can make the first screen say what you do in three seconds.'}
 KEEP_HOURS = 24  # saved scans are removed after this long, as on the real Worker
 UA = ('Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) '
       'Chrome/130.0.0.0 Safari/537.36 SenseCheck/1.0')
@@ -80,7 +87,12 @@ class Handler(SimpleHTTPRequestHandler):
         q = urllib.parse.parse_qs(u.query, keep_blank_values=True)
         email, admin = self.me()
         if u.path == '/api/me':
-            return self.out(200, {'email': email, 'admin': admin, 'store': True, 'local': True, 'users': USERS})
+            return self.out(200, {'email': email, 'admin': admin, 'store': True, 'local': True, 'users': USERS, 'ai': True})
+        if u.path == '/api/design-review' and method == 'POST':
+            # No AI call is made locally. This is a made-up sample so the screen can be checked.
+            self.rfile.read(int(self.headers.get('Content-Length', 0)))
+            time.sleep(1.5)
+            return self.out(200, {'sample': True, 'review': SAMPLE_REVIEW})
         if u.path == '/api/dev-login' and method == 'POST':
             who = q.get('as', [''])[0]
             if who not in USERS:

@@ -1,5 +1,6 @@
-import { detectStack, summarisePsi, diagnose, dnsClues } from './analyze.js';
-import { readPage, buildIssues, healthOf, strengthsOf, skillsFit, nextSteps, verdictOf, whyOf, designOf as designVerdict, norm, CATS, CAT_NAME } from './audit.js';
+import { tr } from './bm.js';
+import { detectStack, summarisePsi, diagnose, dnsClues, vulnsFor } from './analyze.js';
+import { readPage, buildIssues, healthOf, strengthsOf, skillsFit, nextSteps, verdictOf, whyOf, ideasOf, designOf as designVerdict, norm, CATS, CAT_NAME } from './audit.js';
 
 const CFG = await fetch('config.json').then(r => r.json());
 // Who is signed in. The real Worker fills this from the Cloudflare Access login; the local stand-in pretends.
@@ -24,6 +25,9 @@ const I = {
   sun: '<circle cx="12" cy="12" r="4"/><path d="M12 3v2M12 19v2M3 12h2M19 12h2M5.6 5.6l1.4 1.4M17 17l1.4 1.4M5.6 18.4L7 17M17 7l1.4-1.4"/>',
   moon: '<path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z"/>',
   link: '<path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1"/><path d="M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1"/>',
+  copy: '<rect x="8.5" y="8.5" width="11" height="11.5" rx="2.5"/><path d="M5 15.5V6.5A2.5 2.5 0 0 1 7.5 4H15"/>',
+  versus: '<path d="M6.5 20V10M12 20V4M17.5 20v-7"/>',
+  spark: '<path d="M12 4l1.9 5.1L19 11l-5.1 1.9L12 18l-1.9-5.1L5 11l5.1-1.9z"/>',
 };
 const icon = n => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${I[n]}</svg>`;
 const hd = (ic, colour) => `<span class="ic ${colour}">${icon(ic)}</span>`; // coloured icon chip for a section title
@@ -47,7 +51,7 @@ function toast(msg) { const t = $('#toast'); t.textContent = msg; t.classList.ad
 // (shared passcode) they stay in this browser, as before. H.rows is the list currently shown.
 const KEY = 'sensecheck.history.v2';
 const sum = r => ({ id: r.id, by: r.by, domain: r.domain, date: r.date, health: { score: r.health ? r.health.score : null }, verdict: r.verdict, fit: r.fit, stack: { platform: r.stack && r.stack.platform } });
-const strip = r => { const cut = p => (p && !p.error ? { ...p, shot: '' } : p); return { ...r, psi: { mobile: cut(r.psi.mobile), desktop: cut(r.psi.desktop) } }; };
+const strip = r => { const cut = p => (p && !p.error ? { ...p, shot: '', full: '' } : p); return { ...r, psi: { mobile: cut(r.psi.mobile), desktop: cut(r.psi.desktop) } }; };
 // Scans are kept for a limited time (historyHours in config.json), then removed automatically.
 const KEEP_HOURS = +CFG.historyHours || 24, KEEP_MS = KEEP_HOURS * 3600000;
 const local = { all() { try { const all = JSON.parse(localStorage.getItem(KEY)) || [], fresh = all.filter(x => Date.now() - Date.parse(x.date) < KEEP_MS); if (fresh.length !== all.length) localStorage.setItem(KEY, JSON.stringify(fresh)); return fresh; } catch { return []; } }, save(l) { try { localStorage.setItem(KEY, JSON.stringify(l.slice(0, 30))); } catch { /* storage unavailable */ } } };
@@ -61,6 +65,12 @@ const H = {
     if (old && old.health && old.health.score != null) r.prev = { date: old.date, score: old.health.score };
     if (this.server) r.id = (await call('/api/scans', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(strip(r)) })).id;
     else local.save([strip(r), ...local.all().filter(x => x.domain !== r.domain)]);
+  },
+  async update(r) {
+    if (!this.server) return local.save([strip(r), ...local.all().filter(x => x.domain !== r.domain)]);
+    const old = r.id;
+    r.id = (await call('/api/scans', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(strip(r)) })).id;
+    await call('/api/scans/' + encodeURIComponent(old), { method: 'DELETE' }).catch(() => {});
   },
   async remove(id) { if (this.server) await call('/api/scans/' + encodeURIComponent(id), { method: 'DELETE' }); else local.save(local.all().filter(x => String(x.id) !== String(id))); },
 };
@@ -134,7 +144,18 @@ async function wpProbes(origin, s0, probes, latest) {
   (await pool(found, 4, sl => soft(WPORG + sl))).forEach((p, i) => { const v = (body(p).match(/"version":"([\d.]+)"/) || [])[1]; if (v && !/^\s*\{"error"/.test(body(p, 40))) probes.plugins[found[i]].latest = v; });
 }
 
-// Read the sitemap (and up to 8 child sitemaps) so we know how big the site is before we start.
+// What a child sitemap holds, from its file name: blog posts, pages, listing pages to ignore, or a named type.
+const smType = u => {
+  const n = u.split(/[?#]/)[0].split('/').pop().toLowerCase();
+  if (/categor|[-_]cat\b|tag|author|taxonom|users|archive|format|elementor|template|library|popup|landing/.test(n)) return 'skip';
+  if (/^post-sitemap|posts-post|(^|[-_])(posts?|blogs?|news|articles?)[-_.\d]/.test(n)) return 'post';
+  if (/^page-sitemap|posts-page|(^|[-_])pages?[-_.\d]/.test(n)) return 'page';
+  const m = n.match(/^(?:wp-sitemap-posts-)?([a-z][a-z_-]*?)(?:-sitemap)?[-_]?\d*\.xml$/);
+  return m && !/sitemap|index/.test(m[1]) ? m[1] : '';
+};
+
+// Read the sitemap so we know how big the site is before we start. For a sitemap index we read the page lists
+// first and the blog post lists last (those are only needed to know which links to leave out).
 async function readSitemap(origin, robotsText) {
   const listed = [...(robotsText || '').matchAll(/^\s*sitemap:\s*(\S+)/gim)].map(m => m[1]);
   const locs = t => [...t.matchAll(/<loc>\s*(?:<!\[CDATA\[)?\s*([^<\]\s]+)/gi)].map(m => m[1].replace(/&amp;/g, '&'));
@@ -145,34 +166,70 @@ async function readSitemap(origin, robotsText) {
     first = '';
   }
   if (!first) return { found: false, urls: [] };
-  let urls = locs(first);
+  let list = [], more = false;
   if (/<sitemapindex/i.test(first.slice(0, 3000))) {
-    const kids = urls.filter(u => !/image|video|news|attachment/i.test(u)).slice(0, 8);
-    urls = (await pool(kids, 2, k => soft(k))).flatMap(x => locs(body(x)));
-  }
-  const host = new URL(origin).hostname.replace(/^www\./, '');
-  const same = urls.filter(u => { try { return new URL(u).hostname.replace(/^www\./, '') === host; } catch { return false; } });
-  return { found: true, urls: [...new Set(same)] };
+    const kids = locs(first).filter(u => !/image|video|attachment/i.test(u)).map(u => ({ u, type: smType(u) })).filter(k => k.type !== 'skip');
+    const rank = t => (t === 'page' ? 0 : 1);
+    const pick = [...kids.filter(k => k.type !== 'post').sort((a, b) => rank(a.type) - rank(b.type)).slice(0, 8), ...kids.filter(k => k.type === 'post').slice(0, 3)];
+    more = pick.length < kids.length;
+    (await pool(pick, 2, k => soft(k.u))).forEach((x, i) => { for (const href of locs(body(x))) list.push({ href, type: pick[i].type }); });
+  } else list = locs(first).map(href => ({ href, type: '' }));
+  const host = new URL(origin).hostname.replace(/^www\./, ''), seen = new Set();
+  const urls = list.filter(x => { try { if (new URL(x.href).hostname.replace(/^www\./, '') !== host || seen.has(x.href)) return false; seen.add(x.href); return true; } catch { return false; } });
+  urls.more = more; // some sitemap files were not read, so the blog post count is a minimum
+  return { found: true, urls };
 }
 
 const mins = ms => { const sec = Math.max(5, Math.round(ms / 5000) * 5); return sec < 60 ? `about ${sec} seconds` : sec < 3600 ? `about ${Math.round(sec / 60)} ${Math.round(sec / 60) === 1 ? 'minute' : 'minutes'}` : `about ${(sec / 3600).toFixed(1)} hours`; };
 
-// Whole-site crawl. Polite on purpose: same site only, two pages at a time with a pause, robots.txt respected.
-// It stops at the safety limit and asks before going further.
+// Which pages to check. Polite on purpose: same site only, two pages at a time with a pause, robots.txt respected.
+// The homepage and the main pages around it are always checked. Blog posts are left out (they share one layout).
+// A section with more than sectionLimit pages only gets a small sample. Everything left out is counted, and the
+// notes at the end say what was skipped and why, in plain words.
+const BLOG = /^\/(blogs?|news|berita|artikel|articles?|insights?|posts?|stories|updates|press|press-releases?|category|categories|kategori|topics?)\/[^/]/i;
+const DATED = /\/(19|20)\d{2}\/\d{1,2}\//;
+const LANGS = /^(en|ms|my|bm|zh|cn|tw|id|ta|ja|jp|ko|kr|th|vi|ar|fr|de|es|hi)(-[a-z]{2,4})?$/i;
 async function crawl(home, cap, skip, sitemap, ui) {
-  const first = readPage(home.finalUrl, home.status, home.html, CFG), pages = [first], broken = [], seen = new Set([norm(home.finalUrl)]), queue = [];
-  const host = new URL(home.finalUrl).hostname.replace(/^www\./, '');
+  const C = CFG.crawl, LIMIT = C.sectionLimit || 20, SAMPLE = C.sectionSample || 3;
+  const first = readPage(home.finalUrl, home.status, home.html, CFG), pages = [first], broken = [], seen = new Set([norm(home.finalUrl)]);
+  const host = new URL(home.finalUrl).hostname.replace(/^www\./, ''), segs = p => p.toLowerCase().split('/').filter(Boolean);
+  const homeLang = LANGS.test(segs(first.path)[0] || '') ? segs(first.path)[0] : '';
+  const q = [[], [], []], secs = new Map(), posts = new Set();
   const allowed = href => !skip.some(d => new URL(href).pathname.startsWith(d));
-  const push = p => { for (const l of p.links) if (!seen.has(l.key) && allowed(l.href)) { seen.add(l.key); queue.push({ ...l, from: p.path }); } p.links = []; };
-  push(first);
-  for (const u of sitemap) { let x; try { x = new URL(u); } catch { continue; } const href = x.origin + x.pathname, key = norm(href); if (!seen.has(key) && allowed(href) && !/\.(pdf|jpe?g|png|gif|webp|svg|zip|xml)$/i.test(x.pathname)) { seen.add(key); queue.push({ key, href, from: 'sitemap' }); } }
+  // Sort a link into: a blog post (left out), a page inside a section, or a main page.
+  const sort = (path, type, fromBlog) => {
+    let s = segs(path);
+    if (s[0] && LANGS.test(s[0])) { if (s[0] === homeLang) s = s.slice(1); else return { sec: 'lang:' + s[0] }; }
+    const p = '/' + s.join('/') + '/';
+    if (type === 'post' || fromBlog || BLOG.test(p) || DATED.test(p)) return { post: true };
+    if (s.length >= 2) return { sec: s[0] };              // pages in a folder, such as /services/...
+    return type && type !== 'page' ? { sec: 'type:' + type } : {}; // top-level pages of a named type from the sitemap
+  };
+  // pri 0: main pages the homepage links to. 1: section pages the homepage links to. 2: everything found later.
+  const add = (l, from, pri, type, fromBlog) => {
+    if (seen.has(l.key) || !allowed(l.href)) return;
+    seen.add(l.key);
+    const k = sort(new URL(l.href).pathname, type, fromBlog);
+    if (k.post) return void posts.add(l.key);
+    const sec = k.sec || (pri ? 'other' : '');
+    if (sec) { const s = secs.get(sec) || { found: 0, done: 0 }; s.found++; secs.set(sec, s); }
+    q[sec && !pri ? 1 : pri].push({ ...l, from, sec });
+  };
+  const push = (p, pri, fromBlog) => { for (const l of p.links) add(l, p.path, pri, '', fromBlog); p.links = []; };
+  push(first, 0, false);
+  for (const s of sitemap) { let x; try { x = new URL(s.href); } catch { continue; } if (/\.(pdf|jpe?g|png|gif|webp|svg|zip|xml)$/i.test(x.pathname)) continue; const href = x.origin + x.pathname; add({ key: norm(href), href }, 'sitemap', 2, s.type, false); }
+  const big = s => s && s.found > LIMIT;
+  const next = () => { for (const list of q) while (list.length) { const it = list.shift(), s = secs.get(it.sec); if (big(s) && s.done >= SAMPLE) continue; if (s) s.done++; return it; } return null; };
+  const left = () => { const need = new Map(); let n = 0; for (const list of q) for (const it of list) { const s = secs.get(it.sec); if (!big(s)) { n++; continue; } const k = need.has(it.sec) ? need.get(it.sec) : Math.max(0, SAMPLE - s.done); if (k > 0) n++; need.set(it.sec, Math.max(0, k - 1)); } return n; };
   const t0 = performance.now();
-  let tries = 0, limit = cap;
-  const report = () => { const done = pages.length, left = Math.min(queue.length, Math.max(0, limit - done)), per = tries ? (performance.now() - t0) / tries : 700; ui.progress({ done, total: done + left, more: queue.length > left, eta: left * per }); };
+  let tries = 0, limit = cap, stopped = 0;
+  const report = () => { const done = pages.length, rest = left(), show = Math.min(rest, Math.max(0, limit - done)), per = tries ? (performance.now() - t0) / tries : 700; ui.progress({ done, total: done + show, more: rest > show, eta: show * per, posts: posts.size }); };
   report();
-  while (queue.length) {
-    if (pages.length >= limit) { if (cap < 2 || !(await ui.askMore(pages.length, queue.length))) break; limit += cap; }
-    const batch = queue.splice(0, Math.min(2, limit - pages.length));
+  for (;;) {
+    if (pages.length >= limit) { const rest = left(); if (!rest) break; if (cap < 2 || !(await ui.askMore(pages.length, rest))) { stopped = rest; break; } limit += cap; }
+    const batch = [];
+    while (batch.length < Math.min(2, limit - pages.length)) { const it = next(); if (!it) break; batch.push(it); }
+    if (!batch.length) break;
     tries += batch.length;
     (await Promise.all(batch.map(b => soft(b.href)))).forEach((g, i) => {
       if (!g) return;
@@ -181,17 +238,72 @@ async function crawl(home, cap, skip, sitemap, ui) {
       const fu = g.finalUrl || batch[i].href, k = norm(fu);
       if (new URL(fu).hostname.replace(/^www\./, '') !== host || (k !== batch[i].key && seen.has(k))) return;
       seen.add(k);
-      const p = readPage(fu, g.status, g.html, CFG); pages.push(p); push(p);
+      const p = readPage(fu, g.status, g.html, CFG);
+      if (p.post) return void posts.add(k); // a blog post that only showed what it was once opened
+      pages.push(p); push(p, 2, p.blogIndex);
     });
     report();
-    await sleep(CFG.crawl.delayMs);
+    await sleep(C.delayMs);
   }
-  return { pages, broken, skipped: queue.length };
+  // Say what was checked and what was left out, and why.
+  const nice = s => decodeURIComponent(s).replace(/[-_]+/g, ' ').trim(), notes = [], many = (n, w) => `${n} ${w}${n === 1 ? '' : 's'}`;
+  const label = k => (k.startsWith('lang:') ? `“/${k.slice(5)}/” language version` : `“${nice(k.replace(/^type:/, ''))}” section`);
+  notes.push(pages.length === 1 ? 'We checked the homepage.' : `We checked ${pages.length} pages: the homepage and the main pages around it.`);
+  if (posts.size) notes.push(`We left out ${many(posts.size, 'blog post')}${sitemap.more ? ' (and likely more)' : ''}. Blog posts all share one layout, so opening every one would only repeat the same findings and keep you waiting.`);
+  let skipped = posts.size + stopped;
+  for (const [k, s] of secs) {
+    if (!big(s)) continue;
+    skipped += Math.max(0, s.found - s.done);
+    notes.push(k === 'other' ? `${s.found} more pages aren’t linked from the homepage, so we checked ${s.done} of them as a sample.` : `The ${label(k)} has ${s.found} pages. We checked ${s.done} of them as a sample, because pages in the same section are usually built the same way.`);
+  }
+  if (stopped && cap > 1) notes.push(`We stopped at ${pages.length} pages to keep the wait reasonable. About ${stopped} more were not checked.`);
+  return { pages, broken, skipped, cover: notes };
+}
+
+// When the site's security certificate runs out, read from public certificate logs (the latest one issued).
+async function sslInfo(host) {
+  const r = await soft(`https://api.certspotter.com/v1/issuances?domain=${encodeURIComponent(host)}&match_wildcards=true&expand=dns_names`);
+  try {
+    const last = JSON.parse(body(r)).filter(c => c.not_after).sort((a, b) => Date.parse(b.not_after) - Date.parse(a.not_after))[0];
+    if (!last) return null;
+    const end = Date.parse(last.not_after), life = (end - Date.parse(last.not_before)) / 864e5, days = (end - Date.now()) / 864e5;
+    // "Soon" allows for short-lived certificates, which are always close to their end date.
+    return days > 0 ? { expires: last.not_after, expiresText: fmt(last.not_after), soon: days < Math.min(14, life / 6) } : null;
+  } catch { return null; }
+}
+
+// Known security holes for WordPress, Elementor and every plugin whose version we could read and that is behind.
+async function vulnProbes(stack, probes) {
+  const API = 'https://www.wpvulnerability.net/', jobs = [];
+  if (stack.wp && stack.wp.version && stack.wp.status !== 'good') jobs.push(['core', `${API}core/${stack.wp.version}/`, stack.wp.version, true]);
+  if (stack.elementor && stack.elementor.version && stack.elementor.status !== 'good') jobs.push(['elementor', `${API}plugin/elementor/`, stack.elementor.version]);
+  for (const [slug, p] of Object.entries(probes.plugins || {})) if (p.version && p.version !== p.latest) jobs.push([slug, `${API}plugin/${slug}/`, p.version]);
+  probes.vulns = {};
+  (await pool(jobs, 3, j => soft(j[1]))).forEach((x, i) => { const v = vulnsFor(body(x), jobs[i][2], jobs[i][3]); if (v) probes.vulns[jobs[i][0]] = v; });
+}
+
+// The main colours on the first screen, read from Google's screenshot. Shown as plain swatches, with no judgement.
+async function paletteOf(src) {
+  if (!src) return [];
+  try {
+    const img = new Image(); img.src = src; await img.decode();
+    const c = document.createElement('canvas'), w = c.width = 64, h = c.height = Math.max(1, Math.round(64 * img.naturalHeight / img.naturalWidth));
+    const x = c.getContext('2d'); x.drawImage(img, 0, 0, w, h);
+    const d = x.getImageData(0, 0, w, h).data, bins = new Map(), total = d.length / 4;
+    for (let i = 0; i < d.length; i += 4) { const k = (d[i] >> 5) << 6 | (d[i + 1] >> 5) << 3 | (d[i + 2] >> 5), b = bins.get(k) || [0, 0, 0, 0]; b[0]++; b[1] += d[i]; b[2] += d[i + 1]; b[3] += d[i + 2]; bins.set(k, b); }
+    const out = [];
+    for (const b of [...bins.values()].sort((p, q) => q[0] - p[0])) {
+      const rgb = [b[1] / b[0], b[2] / b[0], b[3] / b[0]], near = out.find(o => Math.hypot(o.rgb[0] - rgb[0], o.rgb[1] - rgb[1], o.rgb[2] - rgb[2]) < 48);
+      if (near) near.n += b[0]; else out.push({ rgb, n: b[0] });
+    }
+    return out.filter(o => o.n / total >= 0.03).sort((p, q) => q.n - p.n).slice(0, 6).map(o => ({ hex: '#' + o.rgb.map(v => Math.round(v).toString(16).padStart(2, '0')).join(''), share: Math.round(o.n / total * 100) }));
+  } catch { return []; }
 }
 
 // ---------- scan
-async function runScan(raw, max = S.max) {
+async function runScan(raw, opt = {}) {
   if (S.busy) return;
+  const max = S.max, vsFor = opt.vsFor || null; // vsFor: the client result this scan is a competitor for
   let href = (raw || '').trim();
   if (!href) return toast('Paste a website link first.');
   const hadScheme = /^https?:\/\//i.test(href);
@@ -199,9 +311,10 @@ async function runScan(raw, max = S.max) {
   let u;
   try { u = new URL(href); if (!u.hostname.includes('.')) throw 0; } catch { return toast('That does not look like a website address.'); }
   const domain = u.hostname.replace(/^www\./, '');
-  S.busy = true; S.route = 'scan'; drawNav(); renderScan(domain);
+  if (vsFor && vsFor.domain === domain) return toast('That is the same website. Paste a competitor’s link.');
+  S.busy = true; S.route = 'scan'; drawNav(); renderScan(domain, vsFor);
   ['site', 'm', 'd'].forEach(id => step(id, 'run'));
-  const speed = st => psi(u.href, st).then(v => (step(st[0], 'done'), v), e => (step(st[0], 'fail', e.message), { error: e.message }));
+  const speed = st => psi(u.href, st).then(v => (step(st[0], 'done'), sofar({ [st]: v.scores.performance }), v), e => (step(st[0], 'fail', e.message), { error: e.message }));
   const pm = speed('mobile'), pd = speed('desktop');
 
   let page = null, err = '';
@@ -221,8 +334,8 @@ async function runScan(raw, max = S.max) {
   const origin = new URL(page.finalUrl).origin, probes = {}, latest = {}, s0 = detectStack(page);
   const site = { headers: page.headers, robots: null, sitemap: null, disallow: [] };
   const dnsQ = (name, type) => soft(`https://dns.google/resolve?name=${encodeURIComponent(name)}&type=${type}`).then(x => { try { return (JSON.parse(body(x)).Answer || []).map(a => String(a.data).replace(/\.$/, '').toLowerCase()); } catch { return []; } });
-  const [robots, dom] = await Promise.all([blocked ? null : soft(origin + '/robots.txt'), domainInfo(u.hostname)]);
-  probes.domain = dom;
+  const [robots, dom, ssl] = await Promise.all([blocked ? null : soft(origin + '/robots.txt'), domainInfo(u.hostname), /^https:/.test(origin) ? sslInfo(new URL(origin).hostname) : null]);
+  probes.domain = dom; probes.ssl = ssl;
   // DNS records stay readable even when the site itself blocks us.
   const [nsRec, cnRec] = dom ? await Promise.all([dnsQ(dom.name, 'NS'), dnsQ('www.' + dom.name, 'CNAME')]) : [[], []];
   probes.dns = dnsClues(nsRec, cnRec);
@@ -242,16 +355,23 @@ async function runScan(raw, max = S.max) {
     if (s0.platform && s0.platform.kind === 'wordpress') await wpProbes(origin, s0, probes, latest);
   }
   let stack = detectStack(page, probes, latest);
+  if (stack.wp) { await vulnProbes(stack, probes); stack = detectStack(page, probes, latest); }
   step('stack', 'done');
+  sofar({ stack: [stack.platform && stack.platform.name, stack.wp && stack.wp.version, stack.builder && stack.builder.name].filter(Boolean).join(' ') });
 
-  let pages = [], broken = [], bigImages = [], skipped = 0;
+  let pages = [], broken = [], bigImages = [], skipped = 0, cover = [];
   if (!blocked) {
     step('pages', 'run');
-    ({ pages, broken, skipped } = await crawl(page, max, site.disallow, max > 1 ? site.sitemapUrls || [] : [], progressUi()));
+    // A first look at the homepage while the rest of the site is still being checked.
+    try { const p0 = readPage(page.finalUrl, page.status, page.html, CFG); sofar({ first: buildIssues({ pages: [p0], broken: [], bigImages: [], site, stack, psi: { mobile: { error: 1 }, desktop: { error: 1 } } }, CFG).filter(i => i.sev !== 'Low').slice(0, 4).map(i => i.title) }); } catch { /* the early look is a nicety */ }
+    ({ pages, broken, skipped, cover } = await crawl(page, max, site.disallow, max > 1 ? site.sitemapUrls || [] : [], progressUi()));
     const urls = pages[0].imgUrls, sizes = await pool(urls, 3, peek);
     if (!pages[0].design.favicon) site.favicon = ((await peek(origin + '/favicon.ico')) || {}).status === 200;
+    // Elementor keeps its site-wide colours in one small file. If they are still the ones it ships with, say so.
+    const kit = pages[0].design.kit, kitCss = kit ? (/--e-global-color-primary/.test(page.html) ? page.html : body(await soft(`${origin}/wp-content/uploads/elementor/css/post-${kit}.css`))) : '';
+    site.kitStarter = /--e-global-color-primary:\s*#6EC1E4/i.test(kitCss) && /--e-global-color-accent:\s*#61CE70/i.test(kitCss);
     bigImages = sizes.map((m, i) => ({ url: urls[i], kb: m && m.headers ? Math.round((+m.headers['content-length'] || 0) / 1024) : 0 })).filter(b => b.kb > CFG.thresholds.imageKB);
-    step('pages', 'done', `${pages.length} ${pages.length === 1 ? 'page' : 'pages'}${skipped ? `, ${skipped} more not checked` : ''}`);
+    step('pages', 'done', `${pages.length} ${pages.length === 1 ? 'page' : 'pages'}${skipped ? `, ${skipped} left out` : ''}`);
     const pr = $('#prog'); if (pr) pr.hidden = true;
   } else step('pages', 'fail', 'Skipped');
 
@@ -282,11 +402,13 @@ async function runScan(raw, max = S.max) {
     if (!stack.items.some(i => i.group === 'Platform')) stack.items.unshift({ group: 'Platform', name: 'Not detected', version: '', status: 'warn', note: blocked ? 'Site could not be read' : 'No markers found', conf: 'Low' });
   }
   const r = { id: Date.now(), url: page.finalUrl || u.href, domain, date: new Date().toISOString(), blocked, read, stack, psi: { mobile, desktop }, pages, broken, bigImages, site };
-  r.issues = buildIssues(r, CFG); r.health = healthOf(r); r.strengths = strengthsOf(r); r.design = designVerdict(r); r.why = whyOf(r);
+  r.issues = buildIssues(r, CFG); r.health = healthOf(r); r.strengths = strengthsOf(r); r.design = designVerdict(r); r.why = whyOf(r); r.ideas = ideasOf(r);
+  r.cover = cover; r.palette = await paletteOf((good(desktop) || {}).shot || (good(mobile) || {}).shot);
   r.fit = skillsFit(stack, CFG); r.steps = nextSteps(r, CFG); r.verdict = verdictOf(r);
   r.pagesChecked = pages.length; r.pagesSkipped = skipped;
   for (const k of ['pages', 'broken', 'bigImages', 'site']) delete r[k];
   await H.add(r).catch(e => toast(e.message));
+  if (vsFor) return attachRival(vsFor, r);
   open(r);
 }
 
@@ -303,6 +425,7 @@ function drawNav() {
   nav.innerHTML = b('new', 'plus', 'New scan', S.route === 'new' || S.route === 'scan')
     + b('overview', 'grid', 'Overview', res && S.sec === 'overview', none)
     + b('speed', 'gauge', 'Page speed', res && S.sec === 'speed', none)
+    + (S.result && S.result.vs ? b('compare', 'versus', 'Competitor', res && S.sec === 'compare') : '')
     + b('design', 'layout', 'Design', res && S.sec === 'design', none)
     + b('stack', 'layers', 'Tech stack', res && S.sec === 'stack', none)
     + b('findings', 'list', 'Findings', res && S.sec === 'findings', none)
@@ -349,24 +472,42 @@ function renderHistory() {
     ${rows.length ? '' : '<div class="card"><p class="empty">No scans yet. Run your first check from New scan.</p></div>'}`;
 }
 
-function renderScan(domain) {
+function renderScan(domain, vsFor) {
+  SOFAR = {};
   view.innerHTML = `<div class="top"><div class="crumb">Scans<i>&rsaquo;</i><b>${esc(domain)}</b></div></div>
     <div class="card start"><h1>Checking ${esc(domain)}</h1>
-    <p>We go through every page we can find, two at a time so we don\u2019t slow the client\u2019s website down. Keep this tab open until it finishes.</p>
+    <p>${vsFor ? `This is the competitor for ${esc(vsFor.domain)}. ` : ''}We check the homepage and the main pages around it, two at a time so we don\u2019t slow the website down. Blog posts are left out because they all share one layout. Keep this tab open until it finishes.</p>
     <div class="steps">${[['site', 'Reading the site'], ['stack', 'Identifying the tech stack'], ['pages', 'Checking pages'], ['m', 'Measuring mobile speed'], ['d', 'Measuring desktop speed']].map(([id, t]) => `<div class="step" id="st-${id}"><span class="ic"></span><span>${t}</span><small></small></div>`).join('')}</div>
-    <div class="prog" id="prog" hidden><div class="bar"><i id="progbar"></i></div><p id="progtext"></p><div id="progask"></div></div></div>`;
+    <div class="prog" id="prog" hidden><div class="bar"><i id="progbar"></i></div><p id="progtext"></p><div id="progask"></div></div>
+    <div class="sofar" id="sofar" hidden></div></div>`;
+}
+
+// Early results, shown while the rest of the scan is still running, so nobody stares at a blank screen.
+let SOFAR = {};
+function sofar(patch) {
+  Object.assign(SOFAR, patch);
+  const el = $('#sofar'), t = SOFAR; if (!el) return;
+  const tile = (label, val, tn) => `<div><span class="label">${label}</span><b>${tn ? `<i class="dot ${tn}"></i>` : ''}${val}</b></div>`;
+  const sp = v => (v != null ? `${v} out of 100` : 'Measuring\u2026');
+  el.hidden = false;
+  el.innerHTML = `<h3>What we know so far</h3><div class="tiles">
+    ${tile('Built with', t.stack != null ? esc(t.stack || 'Not clear yet') : 'Checking\u2026')}
+    ${tile('Speed on phones', sp(t.mobile), t.mobile != null ? tone(t.mobile) : '')}
+    ${tile('Speed on computers', sp(t.desktop), t.desktop != null ? tone(t.desktop) : '')}</div>
+    ${t.first && t.first.length ? `<span class="label">First things we noticed on the homepage</span><ul>${t.first.map(x => `<li>${esc(x)}</li>`).join('')}</ul>` : ''}
+    <p class="muted">The full report opens by itself once everything is done.</p>`;
 }
 
 // Live progress for the page check: how many pages, how long is left, and the pause at the safety limit.
 function progressUi() {
   let told = false;
   return {
-    progress({ done, total, more, eta }) {
+    progress({ done, total, more, eta, posts }) {
       const box = $('#prog'); if (!box) return;
       box.hidden = total <= 1;
       $('#progbar').style.width = Math.min(100, Math.round(done / Math.max(1, total) * 100)) + '%';
-      const size = total >= 100 ? `This is a big website, around ${total}${more ? '+' : ''} pages, so it needs a little time.` : `This website has around ${total} pages.`;
-      $('#progtext').innerHTML = `<b>${done} of ${total}${more ? '+' : ''} pages checked.</b> ${done < total ? `${told ? '' : size + ' '}${esc(mins(eta).replace(/^a/, 'A'))} left.` : more ? '' : 'Finishing up.'}`;
+      const size = total >= 100 ? `This is a big website, around ${total}${more ? '+' : ''} pages to check, so it needs a little time.` : `There are around ${total} pages to check.`;
+      $('#progtext').innerHTML = `<b>${done} of ${total}${more ? '+' : ''} pages checked.</b> ${done < total ? `${told ? '' : size + ' '}${esc(mins(eta).replace(/^a/, 'A'))} left.` : more ? '' : 'Finishing up.'}${posts ? ` <span class="muted">Leaving out ${posts} blog ${posts === 1 ? 'post' : 'posts'}, they all share one layout.</span>` : ''}`;
       if (done > 2) told = true;
       step('pages', 'run', `${done} of ${total}${more ? '+' : ''}`);
     },
@@ -400,7 +541,18 @@ const readNote = (r, internal = true) => (r.read ? `<div class="card notice"><h3
   ${r.read.level === 'blocked' ? '<p class="muted">Speed scores still come from Google\u2019s own test. Content, SEO, image and design checks need the page code, so they are not included.</p>' : ''}</div>` : '');
 
 const reasons = list => `<ul>${list.map(x => `<li>${esc(x)}</li>`).join('')}</ul>`;
-const stepsHtml = (r, pkg) => GROUPS.map(([k, t]) => `<div><h4>${t}</h4>${r.steps[k].length ? `<ul>${r.steps[k].map(x => `<li>${esc(x.text)}${pkg ? `<br><span class="chip">${esc(x.pkg)}</span>` : ''}</li>`).join('')}</ul>` : '<p class="muted">Nothing needed.</p>'}</div>`).join('');
+// Indicative "from" prices per package come from config.json (prices). Left empty, nothing about price is shown.
+const priceOf = name => { const k = Object.keys(CFG.packages).find(x => CFG.packages[x] === name); return (k && (CFG.prices || {})[k]) || ''; };
+const stepsHtml = (r, pkg, T = x => x, titles = GROUPS) => titles.map(([k, t]) => `<div><h4>${t}</h4>${r.steps[k].length ? `<ul>${r.steps[k].map(x => `<li>${esc(T(x.text))}${pkg ? `<br><span class="chip">${esc(x.pkg)}${priceOf(x.pkg) ? ` \u00b7 ${esc(priceOf(x.pkg))}` : ''}</span>` : ''}</li>`).join('')}</ul>` : `<p class="muted">${esc(T('Nothing needed.'))}</p>`}</div>`).join('');
+function budgetHtml(r) {
+  const used = [...new Set(GROUPS.flatMap(([k]) => r.steps[k].map(x => x.pkg)))].filter(priceOf);
+  return used.length ? `<p class="budget"><b>Rough budget guide (internal):</b> ${used.map(p => `${esc(p)} ${esc(priceOf(p))}`).join(' \u00b7 ')}. These are starting prices, so confirm the scope before you quote.</p>` : '';
+}
+
+// Design advice grouped by area: what we saw, why it matters and what we would do.
+const AREAS = ['First impression', 'Fonts and colours', 'Photos and visuals', 'Layout and navigation', 'Trust and getting in touch', 'On phones', 'Under the hood'];
+const areaOf = x => (AREAS.includes(x.area) ? x.area : 'Under the hood');
+const adviceHtml = looks => AREAS.map(a => { const list = looks.filter(x => areaOf(x) === a); return list.length ? `<div class="area"><h4>${a}</h4>${list.map(x => `<div class="adv"><b><i class="dot ${SEV[x.sev]}"></i>${esc(x.title)}</b><p>${esc(x.detail)}</p><p class="fix">${esc(x.fix)}</p></div>`).join('')}</div>` : ''; }).join('');
 
 const LEGEND = '<div class="legend"><span><i class="dot m"></i>Mobile</span><span><i class="dot d"></i>Desktop</span></div>';
 const scoreGroups = (m, d) => LH.map(([k, n]) => ({ short: n, name: n, m: m && { score: m.scores[k], display: String(m.scores[k] ?? '–') }, d: d && { score: d.scores[k], display: String(d.scores[k] ?? '–') } }));
@@ -428,6 +580,8 @@ function renderResult() {
         <p class="tone ${r.verdict.tone}">${esc(r.verdict.label)}</p>
         <button class="btn primary" type="button" data-go="pdf-client">${icon('down')}Client PDF</button>
         <button class="btn soft" type="button" data-go="pdf-internal">Internal PDF</button>
+        <button class="btn soft" type="button" data-act="summary">${icon('copy')}Copy summary</button>
+        <button class="btn soft" type="button" data-act="rival">${icon('versus')}${r.vs ? 'Change competitor' : 'Compare with a competitor'}</button>
       </div>
       <div class="col">
         <span class="label">Website health</span>
@@ -440,8 +594,11 @@ function renderResult() {
         <span class="label">Google Lighthouse, out of 100</span>
         ${any ? '<div class="chart" id="chart-scores"></div>' : `<p class="note" style="margin-top:16px">Speed test unavailable. ${esc(perr)}</p>`}
       </div>
-      <p class="summary"><b>In short:</b> ${esc(r.verdict.summary)} <span class="muted">${r.pagesChecked ? `${r.pagesChecked} ${r.pagesChecked === 1 ? 'page' : 'pages'} checked${r.pagesSkipped ? `, ${r.pagesSkipped} more were not` : ''}.` : ''}</span></p>
+      <div class="summary"><p><b>In short:</b> ${esc(r.verdict.summary)}${r.cover ? '' : ` <span class="muted">${r.pagesChecked ? `${r.pagesChecked} ${r.pagesChecked === 1 ? 'page' : 'pages'} checked.` : ''}</span>`}</p>
+        ${r.cover && r.cover.length ? `<div class="cover"><span class="label">Which pages we checked, and why</span>${reasons(r.cover)}</div>` : ''}</div>
     </div>
+
+    ${compareHtml(r)}
 
     ${r.why && r.why.length ? `<div class="card" id="sec-why">
       <div class="card-head"><h3>${hd('search', 'yellow')}What\u2019s behind the scores</h3><span class="muted">The main reasons each one is where it is</span></div>
@@ -464,11 +621,15 @@ function renderResult() {
     </div>
 
     <div class="card" id="sec-design">
-      <div class="card-head"><h3>${hd('layout', 'pink')}Design</h3><span class="muted">Checks for a dated or broken look</span></div>
+      <div class="card-head"><h3>${hd('layout', 'pink')}Design</h3><span class="muted">What looks dated or broken, and what would lift it</span></div>
       <div class="stack">
-        <div><span class="label">Verdict</span><h4>${dotted(dz.tone, esc(dz.label))}</h4><p class="ink2" style="margin-top:10px">${esc(dz.note)}</p></div>
-        <div>${looks.length ? `<ul class="goodlist one">${looks.map(x => `<li><i class="dot ${SEV[x.sev]}"></i><span>${esc(x.title)}</span></li>`).join('')}</ul>` : `<p class="note">${dz.tone === 'info' ? 'No design findings.' : 'The checks found nothing dated or broken.'}</p>`}</div>
+        <div><span class="label">Verdict</span><h4>${dotted(dz.tone, esc(dz.label))}</h4><p class="ink2" style="margin-top:10px">${esc(dz.note)}</p>
+          ${r.palette && r.palette.length ? `<span class="label sub">Main colours on the first screen</span><div class="swatches">${r.palette.map(p => `<span><i style="background:${esc(p.hex)}"></i>${esc(p.hex.toUpperCase())}</span>`).join('')}</div>` : ''}
+          <div id="ai">${aiHtml(r)}</div>
+        </div>
+        <div class="advice">${looks.length ? adviceHtml(looks) : `<p class="note">${dz.tone === 'info' ? 'No design findings.' : 'The checks found nothing dated or broken.'}</p>`}</div>
       </div>
+      ${r.ideas && r.ideas.length ? `<div class="ideas"><h4>Ideas worth pitching</h4><p class="muted">Things this site doesn\u2019t have yet. They\u2019re suggestions, not faults, so they don\u2019t affect the score.</p><div class="idea-grid">${r.ideas.map(i => `<div><b>${esc(i.title)}</b><p>${esc(i.text)}</p></div>`).join('')}</div></div>` : ''}
     </div>
 
     <div class="card" id="sec-stack">
@@ -501,8 +662,10 @@ function renderResult() {
     <div class="card" id="sec-steps">
       <div class="card-head"><h3>${hd('flag', 'purple')}Recommended next steps</h3><span class="muted">Each one maps to a service package</span></div>
       <div class="steps3">${stepsHtml(r, true)}</div>
+      ${budgetHtml(r)}
     </div>`;
   if (any) { drawChart($('#chart-scores'), scoreGroups(m, d), { labels: true, bw: 22 }); drawChart($('#chart-speed'), speedGroups(m, d)); }
+  if (r.vs) drawChart($('#chart-vs'), vsGroups(r), VS_CHART);
   drawRows();
 }
 
@@ -519,7 +682,7 @@ function drawRows() {
 // Grouped bars, mobile next to desktop, on a 0 to 100 scale. With labels the value sits on top of each bar;
 // without, the values are in the tooltip and in the table beside the chart.
 function chartGeo(n, o = {}) {
-  const W = 520, Hh = 270, L = 34, R = 6, T = o.labels ? 24 : 14, B = 32, pw = W - L - R, ph = Hh - T - B;
+  const W = o.w || 520, Hh = 270, L = 34, R = 6, T = o.labels ? 24 : 14, B = 32, pw = W - L - R, ph = Hh - T - B;
   return { W, Hh, L, R, T, ph, gw: pw / n, bw: o.bw || 14, gap: o.labels ? 6 : 2, y: v => T + ph - (v / 100) * ph };
 }
 function chartSvg(groups, o = {}) {
@@ -551,63 +714,261 @@ function drawChart(el, groups, o = {}) {
   el.addEventListener('pointerleave', hide);
 }
 
+// ---------- small dialog (compare, summary, PDF options)
+const modal = document.body.appendChild(Object.assign(document.createElement('div'), { id: 'modal', className: 'modal', hidden: true })); // on <body>, so it is fixed to the window and not to the page
+function openModal(html) { modal.innerHTML = `<div class="sheet" role="dialog" aria-modal="true">${html}</div>`; modal.hidden = false; const f = modal.querySelector('input,textarea,select'); if (f) f.focus(); }
+function closeModal() { modal.hidden = true; modal.innerHTML = ''; }
+modal.addEventListener('mousedown', e => { if (e.target === modal) closeModal(); });
+document.addEventListener('keydown', e => { if (e.key === 'Escape' && !modal.hidden) closeModal(); });
+
+function act(name) {
+  if (name === 'close') return closeModal();
+  if (!S.result) return;
+  if (name === 'rival') return rivalDialog();
+  if (name === 'rival-remove') { closeModal(); delete S.result.vs; H.update(S.result).catch(e => toast(e.message)); S.sec = 'overview'; return render(); }
+  if (name === 'summary') return summaryDialog('en');
+  if (name === 'sum-en' || name === 'sum-bm') return summaryDialog(name.slice(4));
+  if (name === 'sum-copy') return copyText($('#sum-text').value);
+  if (name === 'ai') return aiReview();
+}
+
+// ---------- competitor comparison
+// The competitor gets the same full check. A slim copy of its numbers is kept on the client's result (r.vs).
+const slim = c => {
+  const m = good(c.psi.mobile), d = good(c.psi.desktop), lcp = (m ? m.metrics.find(x => x.id === 'largest-contentful-paint') : null) || {};
+  return { domain: c.domain, date: c.date, health: c.health, perf: { m: m ? m.scores.performance : null, d: d ? d.scores.performance : null }, lcp: { display: lcp.display || '', value: lcp.value ?? null },
+    weight: m && m.weight ? m.weight : null, platform: [c.stack.platform && c.stack.platform.name, c.stack.builder && c.stack.builder.name].filter(x => x && x !== 'Not detected').join(' with ') || 'Not detected',
+    pages: c.pagesChecked || 0, serious: c.issues.filter(i => i.sev === 'Critical' || i.sev === 'High').length, design: c.design ? c.design.label : '' };
+};
+async function attachRival(client, rival) {
+  client.vs = slim(rival);
+  await H.update(client).catch(e => toast(e.message));
+  open(client);
+  S.sec = 'compare'; drawNav();
+  const el = $('#sec-compare'); if (el) el.scrollIntoView({ block: 'start' });
+}
+function rivalDialog() {
+  openModal(`<h3>Compare with a competitor</h3><p>Paste a competitor’s link. We run the same check on it and put the two side by side. It takes about as long as a normal scan.</p>
+    <form id="rival-f" novalidate><label class="field">${icon('link')}<input id="rival-u" type="text" inputmode="url" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="competitor.com.my" aria-label="Competitor website address"></label>
+    <div class="sheet-foot">${S.result.vs ? '<button class="link" type="button" data-act="rival-remove">Remove the comparison</button>' : ''}<button class="btn soft" type="button" data-act="close">Cancel</button><button class="btn primary" type="submit">Run comparison</button></div></form>`);
+}
+const VS_CHART = { labels: true, bw: 20, w: 860 };
+const SHORT = { Performance: 'Speed', SEO: 'SEO', Design: 'Design', Content: 'Content', Images: 'Images', Accessibility: 'Mobile', Security: 'Security' };
+const vsGroups = (r, T = x => x) => { const b = r.vs, g = (short, name, x, y) => ({ short: T(short), name: T(name), m: { score: x, display: String(x ?? '–') }, d: { score: y, display: String(y ?? '–') } }); return [g('Overall', 'Overall health', r.health.score, b.health.score), ...CATS.map(c => g(SHORT[c], CAT_NAME[c], r.health.sub[c], b.health.sub[c]))]; };
+// Where each side is ahead, as short sentences. A gap under 8 points is treated as level.
+function versus(r) {
+  const a = slim(r), b = r.vs, mine = [], theirs = [];
+  for (const c of CATS) { const x = a.health.sub[c], y = b.health.sub[c]; if (x == null || y == null || Math.abs(x - y) < 8) continue; (x > y ? mine : theirs).push({ cat: c, x, y }); }
+  const lcp = a.lcp.value && b.lcp.value && Math.abs(a.lcp.value - b.lcp.value) > 800 ? { ahead: a.lcp.value < b.lcp.value, x: a.lcp.display, y: b.lcp.display } : null;
+  return { a, b, mine, theirs, lcp };
+}
+const vsLine = (k, T = x => x) => `${T(CAT_NAME[k.cat])}: ${k.x} ${T('against')} ${k.y}`;
+function vsTable(r, T = x => x) {
+  const { a, b } = versus(r), kb = w => (w ? (w / 1024).toFixed(1) + ' MB' : '–'), sc = (s, t = tone) => (s == null ? '–' : dotted(t(s), s));
+  const row = (label, x, y) => `<tr><td><b>${T(label)}</b></td><td>${x}</td><td>${y}</td></tr>`;
+  return `<table class="mini vs"><thead><tr><th></th><th>${esc(a.domain)}</th><th>${esc(b.domain)}</th></tr></thead><tbody>
+    ${row('Website health', sc(a.health.score, htone), sc(b.health.score, htone))}${row('Speed on phones', sc(a.perf.m), sc(b.perf.m))}${row('Speed on computers', sc(a.perf.d), sc(b.perf.d))}
+    ${row('Main content shows up (phones)', esc(a.lcp.display || '–'), esc(b.lcp.display || '–'))}${row('Homepage weight', kb(a.weight), kb(b.weight))}
+    ${row('Built with', esc(a.platform.split(' with ').map(T).join(` ${T('with')} `)), esc(b.platform.split(' with ').map(T).join(` ${T('with')} `)))}${row('Design', esc(T(a.design || '–')), esc(T(b.design || '–')))}${row('Serious issues', a.serious, b.serious)}${row('Pages checked', a.pages, b.pages)}</tbody></table>`;
+}
+function compareHtml(r) {
+  if (!r.vs) return '';
+  const k = versus(r), list = (xs, extra) => { const all = [...xs.map(x => vsLine(x)), ...(extra ? [extra] : [])]; return all.length ? reasons(all) : '<p class="muted">Nothing clearly ahead.</p>'; };
+  const speed = k.lcp ? `On phones, the main content shows up in ${k.lcp.x} on ${r.domain} and ${k.lcp.y} on ${r.vs.domain}` : '';
+  return `<div class="card" id="sec-compare">
+    <div class="card-head"><h3>${hd('versus', 'cyan')}Compared with ${esc(r.vs.domain)}</h3><span class="muted">Same check on both, ${fmt(r.vs.date)}</span></div>
+    <div class="chart-head"><span class="label">Health scores, out of 100</span><div class="legend"><span><i class="dot m"></i>${esc(r.domain)}</span><span><i class="dot d"></i>${esc(r.vs.domain)}</span></div></div>
+    <div class="chart wide" id="chart-vs"></div>
+    <div class="tablewrap" style="margin-top:18px">${vsTable(r)}</div>
+    <div class="vs2"><div><h4>Where ${esc(r.domain)} is ahead</h4>${list(k.mine, k.lcp && k.lcp.ahead ? speed : '')}</div><div><h4>Where ${esc(r.vs.domain)} is ahead</h4>${list(k.theirs, k.lcp && !k.lcp.ahead ? speed : '')}</div></div>
+    <p class="muted" style="margin-top:14px">Both sites got the same checks, so the numbers are fair to put side by side. Speed scores move a few points between runs, so treat small gaps as level.</p>
+  </div>`;
+}
+
+// ---------- summary to copy (WhatsApp or email), English or Bahasa Malaysia
+function summaryText(r, lang) {
+  const bm = lang === 'bm', T = x => (bm ? tr(x) : x), L = [];
+  // The three biggest findings, one per category so the message isn't three lines about the same thing, and what we'd do about each.
+  const top = [];
+  for (const i of r.issues) { if (i.tip || top.some(t => t.cat === i.cat)) continue; top.push(i); if (top.length === 3) break; }
+  const steps = [...new Set(top.map(i => i.fix))].map(text => ({ text }));
+  L.push(bm ? `Hai, kami sudah semak laman web ${r.domain}. Ini ringkasannya:` : `Hi, we had a look at ${r.domain}. Here’s a quick summary:`, '');
+  if (r.health.score != null) L.push(bm ? `Skor kesihatan laman web: ${r.health.score} daripada 100 (${T(r.verdict.label)}).` : `Website health score: ${r.health.score} out of 100 (${r.verdict.label}).`);
+  if (top.length) { L.push('', bm ? 'Perkara utama yang kami perasan:' : 'The main things we noticed:'); top.forEach((i, n) => L.push(`${n + 1}. ${T(i.title)}. ${T(i.detail)}`)); }
+  if (r.strengths.length) { L.push('', bm ? 'Apa yang sudah bagus:' : 'What’s already working well:'); r.strengths.slice(0, 3).forEach(x => L.push(`- ${T(x)}`)); }
+  if (r.vs && r.vs.health.score != null && r.health.score != null) L.push('', bm ? `Berbanding ${r.vs.domain}: skor mereka ${r.vs.health.score}, skor anda ${r.health.score}.` : `Next to ${r.vs.domain}: they score ${r.vs.health.score}, you score ${r.health.score}.`);
+  if (steps.length) { L.push('', bm ? 'Cadangan kami:' : 'What we’d suggest:'); steps.forEach(x => L.push(`- ${T(x.text)}`)); }
+  L.push('', bm ? 'Laporan penuh sudah siap. Bila masa yang sesuai untuk kami terangkan?' : 'The full report is ready. When’s a good time to walk you through it?');
+  return L.join('\n');
+}
+function summaryDialog(lang) {
+  openModal(`<h3>Summary to send</h3><p>A short message for WhatsApp or email. Change anything you like, then copy it.</p>
+    <div class="seg"><button type="button" data-act="sum-en" class="${lang === 'en' ? 'on' : ''}">English</button><button type="button" data-act="sum-bm" class="${lang === 'bm' ? 'on' : ''}">Bahasa Malaysia</button></div>
+    <textarea id="sum-text" rows="15" spellcheck="false">${esc(summaryText(S.result, lang))}</textarea>
+    <div class="sheet-foot"><button class="btn soft" type="button" data-act="close">Close</button><button class="btn primary" type="button" data-act="sum-copy">${icon('copy')}Copy</button></div>`);
+}
+async function copyText(text) {
+  try { await navigator.clipboard.writeText(text); }
+  catch { const t = $('#sum-text'); if (t) { t.select(); document.execCommand('copy'); } }
+  closeModal(); toast('Copied. Paste it into WhatsApp or email.');
+}
+
+// ---------- AI design opinion (optional: only shown when the Worker has a Claude API key)
+// Screenshots are redrawn as JPEG first. The long phone screenshot is cut into two pieces so the detail survives.
+async function shotsForAi(r) {
+  const m = good(r.psi.mobile) || {}, d = good(r.psi.desktop) || {}, out = [];
+  const add = async (label, src, y0 = 0, hMax = 1600) => {
+    if (!src) return;
+    try {
+      const img = new Image(); img.src = src; await img.decode();
+      const hh = Math.min(hMax, img.naturalHeight - y0); if (hh < 80) return;
+      const c = document.createElement('canvas'); c.width = img.naturalWidth; c.height = hh;
+      const x = c.getContext('2d'); x.fillStyle = '#fff'; x.fillRect(0, 0, c.width, hh); x.drawImage(img, 0, y0, img.naturalWidth, hh, 0, 0, img.naturalWidth, hh);
+      out.push({ label, data: c.toDataURL('image/jpeg', 0.82) });
+    } catch { /* skip a screenshot that will not load */ }
+  };
+  await add('Desktop, first screen', d.shot);
+  if (m.full) { await add('Phone, top of the page', m.full, 0, 1500); await add('Phone, further down the page', m.full, 1500, 1500); } else await add('Phone, first screen', m.shot);
+  return out;
+}
+const AI_CALL = { fresh: 'Looks fresh', okay: 'Looks okay', dated: 'Looks dated' };
+function aiHtml(r) {
+  if (r.ai && r.ai.review) {
+    const a = r.ai.review;
+    return `<span class="label sub">AI design opinion</span><div class="aibox"><p><b>${esc(AI_CALL[a.dated] || 'Overall')}.</b> ${esc(a.impression)}</p>
+      ${(a.points || []).map(p => `<div class="adv"><b>${esc(p.area)}</b><p>${esc(p.saw)}</p><p class="fix">${esc(p.do)}</p></div>`).join('')}
+      <p class="pitch"><b>A way to open the conversation:</b> ${esc(a.pitch)}</p>
+      <p class="muted small">${r.ai.sample ? 'This is a made-up sample for the local preview, not a real opinion.' : 'Written by AI from the screenshots. Read it through before you use it.'}</p></div>`;
+  }
+  if (!ME.ai) return '';
+  const has = [r.psi.mobile, r.psi.desktop].some(p => good(p) && (p.shot || p.full));
+  return `<span class="label sub">AI design opinion</span><p class="muted small">Our checks can’t judge taste. The AI looks at the screenshots and gives an opinion the way a designer would. Each one costs about 30 sen.</p>
+    ${has ? `<button class="btn soft" type="button" data-act="ai">${icon('spark')}Ask AI about the design</button>` : '<p class="muted small">The screenshots aren’t kept with saved scans. Scan the site again, then ask.</p>'}`;
+}
+async function aiReview() {
+  const r = S.result, box = $('#ai'); if (!box || r.aiBusy) return;
+  r.aiBusy = true;
+  box.innerHTML = '<span class="label sub">AI design opinion</span><p class="muted small">Looking at the screenshots. This takes about half a minute.</p>';
+  try {
+    const shots = await shotsForAi(r);
+    if (!shots.length) throw new Error('There are no screenshots to look at. Scan the site again first.');
+    const facts = { domain: r.domain, built: (r.stack.items.find(i => i.group === 'Platform') || {}).name || '', found: r.issues.filter(i => i.cat === 'Design').map(i => i.title).slice(0, 12) };
+    const res = locked(await fetch('/api/design-review', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ shots, facts }) })), j = await res.json().catch(() => null);
+    if (!res.ok || !j || !j.review) throw new Error((j && j.error) || 'The AI opinion did not come back. Try again in a moment.');
+    r.ai = { review: j.review, sample: !!j.sample, date: new Date().toISOString() };
+    H.update(r).catch(() => {});
+  } catch (e) { toast(e.message); }
+  r.aiBusy = false;
+  if (S.result === r && $('#ai')) $('#ai').innerHTML = aiHtml(r);
+}
+
+// ---------- PDF options: who it is for, who prepared it, and the language of the client version
+function pdfDialog(mode) {
+  if (!S.result) return;
+  let by = ''; try { by = localStorage.getItem('sensecheck.by') || ''; } catch { /* storage unavailable */ }
+  openModal(`<h3>${mode === 'internal' ? 'Internal PDF' : 'Client PDF'}</h3><p>${mode === 'internal' ? 'For our own team. It includes versions, the skills check and service packages, so don’t send it to the client.' : 'Safe to send to the client.'} The names are optional and go on the cover page.</p>
+    <form id="pdf-f" data-mode="${mode}" novalidate>
+      <label class="lab">Prepared for<input id="pdf-for" type="text" placeholder="Client or company name" autocomplete="off" value="${esc(S.result.clientName || '')}"></label>
+      <label class="lab">Prepared by<input id="pdf-by" type="text" placeholder="Your name" autocomplete="off" value="${esc(by)}"></label>
+      ${mode === 'client' ? '<label class="lab">Language<select id="pdf-lang"><option value="en">English</option><option value="bm">Bahasa Malaysia</option></select></label>' : ''}
+      <div class="sheet-foot"><button class="btn soft" type="button" data-act="close">Cancel</button><button class="btn primary" type="submit">${icon('down')}Create PDF</button></div></form>`);
+}
+
 // ---------- PDF report (print layout). mode: 'client' to share, 'internal' adds skills fit, versions and packages.
-function buildReport(mode) {
+// o.client and o.by go on the cover page. o.lang 'bm' gives the client report in Bahasa Malaysia: fixed labels are
+// written here with W(english, malay) and everything the checks wrote goes through tr() from bm.js.
+function buildReport(mode, o = {}) {
   const r = S.result, m = good(r.psi.mobile), d = good(r.psi.desktop), v = r.stack.verdict, h = r.health, int = mode === 'internal', dz = designOf(r);
-  const cell = (s, t = tone) => (s == null ? '\u2013' : dotted(t(s), s));
+  const bm = !int && o.lang === 'bm', T = x => (bm ? tr(x) : x), W = (en, my) => (bm ? my : en);
+  const day = iso => new Date(iso).toLocaleDateString(bm ? 'ms-MY' : 'en-GB', { day: 'numeric', month: 'long', year: 'numeric' });
+  const cell = (s, t = tone) => (s == null ? '–' : dotted(t(s), s));
   const main = g => r.stack.items.filter(i => i.group === g && !/^Not detected|^PHP version/.test(i.name)).map(i => i.name);
-  const built = [...main('Platform'), ...main('Page builder')].join(' and '), theme = main('Theme')[0], host = main('Hosting').filter(x => x !== 'PHP').join(', ');
+  const built = [...main('Platform'), ...main('Page builder')].join(W(' and ', ' dan ')), theme = main('Theme')[0], host = main('Hosting').filter(x => x !== 'PHP').join(', ');
+  const SEVN = { Critical: 'Kritikal', High: 'Tinggi', Medium: 'Sederhana', Low: 'Rendah' }, sev = s => W(s, SEVN[s]);
+  const R = 54, C = 2 * Math.PI * R;
+  const ring = `<svg viewBox="0 0 140 140" class="rp-ring" aria-hidden="true"><circle cx="70" cy="70" r="${R}" class="track"/><circle cx="70" cy="70" r="${R}" class="arc ${htone(h.score)}" stroke-dasharray="${(C * (h.score || 0) / 100).toFixed(1)} ${C.toFixed(1)}" transform="rotate(-90 70 70)"/><text x="70" y="79" text-anchor="middle" class="num">${h.score ?? '–'}</text><text x="70" y="99" text-anchor="middle" class="of">${W('out of 100', 'daripada 100')}</text></svg>`;
+  const meta = [[W('Prepared for', 'Disediakan untuk'), o.client], [W('Prepared by', 'Disediakan oleh'), o.by ? `${o.by}, MYSense` : 'MYSense'], [W('Date', 'Tarikh'), day(r.date)], [W('Pages checked', 'Halaman disemak'), r.pagesChecked || '']].filter(x => x[1]);
+  // Why lines: speed lines come from the scan; the other categories are rebuilt from the findings so they translate cleanly.
+  const whyLines = w => (w.cat === 'Performance' || !bm ? w.lines.map(T) : r.issues.filter(i => i.cat === w.cat).slice(0, 3).map(i => `${T(i.title)}. ${T(i.detail)}`));
+  const groupNames = bm ? [['quick', 'Pembaikan pantas'], ['revamp', 'Kerja rombakan'], ['maintenance', 'Penyelenggaraan berterusan']] : GROUPS;
+  const vs = r.vs ? versus(r) : null, vsList = (xs, extra) => { const all = [...xs.map(x => vsLine(x, T)), ...(extra ? [extra] : [])]; return all.length ? reasons(all) : `<p>${W('Nothing clearly ahead.', 'Tiada yang jelas mendahului.')}</p>`; };
+  const vsSpeed = vs && vs.lcp ? W(`On phones, the main content shows up in ${vs.lcp.x} on ${r.domain} and ${vs.lcp.y} on ${r.vs.domain}`, `Di telefon, kandungan utama muncul dalam ${vs.lcp.x} di ${r.domain} dan ${vs.lcp.y} di ${r.vs.domain}`) : '';
+  const looks = r.issues.filter(i => i.cat === 'Design');
   $('#report').innerHTML = `
-    <div class="rp-head">${LOGO}SenseCheck<span>${int ? 'Internal website audit' : 'Website health report'}, ${fmt(r.date)}</span></div>
+    <section class="rp-cover">
+      <div class="rp-band"></div>
+      <img class="rp-cover-logo" src="img/mysense-light.png" alt="MYSense">
+      <p class="rp-kicker">${int ? 'Internal website audit' : W('Website health report', 'Laporan kesihatan laman web')}</p>
+      <h1>${esc(r.domain)}</h1>
+      <div class="rp-score">${ring}<div><p class="rp-verdict">${dotted(r.verdict.tone, esc(T(r.verdict.label)))}</p><p>${W('Overall website health, from speed, search, design, content, images, mobile and security checks.', 'Kesihatan keseluruhan laman web, berdasarkan semakan kelajuan, carian, reka bentuk, kandungan, imej, mudah alih dan keselamatan.')}</p></div></div>
+      <table class="rp-meta"><tbody>${meta.map(([k, x]) => `<tr><td>${k}</td><td>${esc(x)}</td></tr>`).join('')}</tbody></table>
+      ${int ? '<p class="rp-conf">For MYSense staff only. Please don’t send this version to the client.</p>' : ''}
+    </section>
+
+    <div class="rp-head">${LOGO}SenseCheck<span>${int ? 'Internal website audit' : W('Website health report', 'Laporan kesihatan laman web')}, ${day(r.date)}</span></div>
     <h1>${esc(r.domain)}</h1>
-    <p class="rp-verdict">${dotted(r.verdict.tone, esc(r.verdict.label))}</p>
-    <p class="rp-sum">${esc(r.verdict.summary)}</p>
-    ${r.read ? `<div class="rp-box" style="margin-top:12pt"><h3>${r.read.level === 'blocked' ? 'Part of this report is limited' : 'A note on this report'}</h3><p><b>${esc(r.read.title)}.</b> ${esc(r.read.why)}</p>${int ? `<p><b>What to do:</b> ${esc(r.read.next)}</p>` : ''}</div>` : ''}
+    <p class="rp-verdict">${dotted(r.verdict.tone, esc(T(r.verdict.label)))}</p>
+    <p class="rp-sum">${esc(T(r.verdict.summary))}</p>
+    ${r.read ? `<div class="rp-box" style="margin-top:12pt"><h3>${W(r.read.level === 'blocked' ? 'Part of this report is limited' : 'A note on this report', 'Nota tentang laporan ini')}</h3>${bm ? '<p>Sebahagian laman web ini tidak dapat dibaca sepenuhnya oleh alat semakan kami, jadi beberapa bahagian laporan ini terhad.</p>' : `<p><b>${esc(r.read.title)}.</b> ${esc(r.read.why)}</p>`}${int ? `<p><b>What to do:</b> ${esc(r.read.next)}</p>` : ''}</div>` : ''}
     ${int ? `<div class="rp-box" style="margin-top:12pt"><h3>Can we take it? ${dotted(r.fit.tone, r.fit.verdict)}</h3>${reasons(r.fit.reasons)}</div>` : ''}
     <div class="rp-top">
       ${(d && d.shot) || (m && m.shot) ? `<div class="shots">${d && d.shot ? `<img src="${esc(d.shot)}" alt="">` : ''}${m && m.shot ? `<img src="${esc(m.shot)}" alt="">` : ''}</div>` : ''}
-      <div class="scores"><table><thead><tr><th>Website health</th><th>Score out of 100</th></tr></thead><tbody>
-        <tr><td><b>Overall</b></td><td><b>${cell(h.score, htone)}</b></td></tr>
-        ${CATS.map(c => `<tr><td>${CAT_NAME[c]}</td><td>${h.sub[c] == null ? 'Not measured' : cell(h.sub[c], htone)}</td></tr>`).join('')}
+      <div class="scores"><table><thead><tr><th>${W('Website health', 'Kesihatan laman web')}</th><th>${W('Score out of 100', 'Skor daripada 100')}</th></tr></thead><tbody>
+        <tr><td><b>${W('Overall', 'Keseluruhan')}</b></td><td><b>${cell(h.score, htone)}</b></td></tr>
+        ${CATS.map(c => `<tr><td>${T(CAT_NAME[c])}</td><td>${h.sub[c] == null ? W('Not measured', 'Tidak diukur') : cell(h.sub[c], htone)}</td></tr>`).join('')}
       </tbody></table></div>
     </div>
+    ${r.cover && r.cover.length ? `<p class="rp-note"><b>${W('Which pages we checked.', 'Halaman yang kami semak.')}</b> ${r.cover.map(x => esc(T(x))).join(' ')}</p>` : ''}
 
-    ${r.why && r.why.some(w => w.lines.length) ? `<h2>What\u2019s behind the scores</h2><div class="rp-why">${r.why.filter(w => w.lines.length).map(w => `<p><b>${CAT_NAME[w.cat]} (${w.score}).</b> ${w.lines.map(esc).join(' ')}</p>`).join('')}</div>` : ''}
+    ${r.why && r.why.some(w => w.lines.length) ? `<h2>${W('What’s behind the scores', 'Sebab di sebalik skor')}</h2><div class="rp-why">${r.why.filter(w => w.lines.length).map(w => `<p><b>${T(CAT_NAME[w.cat])} (${w.score}).</b> ${whyLines(w).map(esc).join(' ')}</p>`).join('')}</div>` : ''}
 
-    <h2>Page speed</h2>
-    ${m || d ? `<div class="rp-charts"><div><p class="rp-cap">Scores by device</p><div class="chart">${chartSvg(scoreGroups(m, d), { labels: true, bw: 22 })}</div></div><div><p class="rp-cap">Speed by metric, score out of 100</p><div class="chart">${chartSvg(speedGroups(m, d))}</div></div></div>
-      <p class="rp-legend"><i class="dot m"></i>Mobile &nbsp; <i class="dot d"></i>Desktop</p>` : ''}
-    ${m || d ? `<table><thead><tr><th>Measure</th><th>Mobile</th><th>Desktop</th></tr></thead><tbody>
-      ${LH.map(([k, n]) => `<tr><td><b>${n} score</b></td><td>${cell(m ? m.scores[k] : null)}</td><td>${cell(d ? d.scores[k] : null)}</td></tr>`).join('')}
-      ${(m || d).metrics.map((x, i) => `<tr><td>${x.name} <span class="d">(${x.short})</span></td><td>${m ? dotted(tone(m.metrics[i].score), esc(m.metrics[i].display)) : '\u2013'}</td><td>${d ? dotted(tone(d.metrics[i].score), esc(d.metrics[i].display)) : '\u2013'}</td></tr>`).join('')}
-    </tbody></table>` : '<p>The speed test could not be completed for this site.</p>'}
-    ${m && m.field && m.field.lcp ? `<p class="rp-sum">Real visitors on Chrome over the last 28 days: main content appears in ${(m.field.lcp.value / 1000).toFixed(1)} s${m.field.overall ? `, rated ${{ FAST: 'fast', AVERAGE: 'average', SLOW: 'slow' }[m.field.overall] || 'unrated'} overall` : ''}.</p>` : ''}
+    ${vs ? `<h2>${W('How it compares with', 'Perbandingan dengan')} ${esc(r.vs.domain)}</h2>
+      <div class="rp-vs"><p class="rp-cap">${W('Health scores, out of 100', 'Skor kesihatan, daripada 100')}</p><div class="chart">${chartSvg(vsGroups(r, T), VS_CHART)}</div></div>
+      <p class="rp-legend"><i class="dot m"></i>${esc(r.domain)} &nbsp; <i class="dot d"></i>${esc(r.vs.domain)}</p>
+      ${vsTable(r, T)}
+      <div class="rp-cols two"><div><h4>${W('Where', 'Di mana')} ${esc(r.domain)} ${W('is ahead', 'mendahului')}</h4>${vsList(vs.mine, vs.lcp && vs.lcp.ahead ? vsSpeed : '')}</div><div><h4>${W('Where', 'Di mana')} ${esc(r.vs.domain)} ${W('is ahead', 'mendahului')}</h4>${vsList(vs.theirs, vs.lcp && !vs.lcp.ahead ? vsSpeed : '')}</div></div>` : ''}
 
-    <h2>Design</h2>
-    <div class="rp-box"><h3>${dotted(dz.tone, esc(dz.label))}</h3><p>${esc(int ? dz.note : 'This comes from our checks for design that looks dated or broken.')}</p></div>
+    <h2>${W('Page speed', 'Kelajuan halaman')}</h2>
+    ${m || d ? `<div class="rp-charts"><div><p class="rp-cap">${W('Scores by device', 'Skor mengikut peranti')}</p><div class="chart">${chartSvg(scoreGroups(m, d).map(g => ({ ...g, short: T(g.short) })), { labels: true, bw: 22 })}</div></div><div><p class="rp-cap">${W('Speed by metric, score out of 100', 'Kelajuan mengikut ukuran, skor daripada 100')}</p><div class="chart">${chartSvg(speedGroups(m, d))}</div></div></div>
+      <p class="rp-legend"><i class="dot m"></i>${W('Mobile', 'Telefon')} &nbsp; <i class="dot d"></i>${W('Desktop', 'Komputer')}</p>` : ''}
+    ${m || d ? `<table><thead><tr><th>${W('Measure', 'Ukuran')}</th><th>${W('Mobile', 'Telefon')}</th><th>${W('Desktop', 'Komputer')}</th></tr></thead><tbody>
+      ${LH.map(([k, n]) => `<tr><td><b>${T(n + ' score')}</b></td><td>${cell(m ? m.scores[k] : null)}</td><td>${cell(d ? d.scores[k] : null)}</td></tr>`).join('')}
+      ${(m || d).metrics.map((x, i) => `<tr><td>${T(x.name)} <span class="d">(${x.short})</span></td><td>${m ? dotted(tone(m.metrics[i].score), esc(m.metrics[i].display)) : '–'}</td><td>${d ? dotted(tone(d.metrics[i].score), esc(d.metrics[i].display)) : '–'}</td></tr>`).join('')}
+    </tbody></table>` : `<p>${W('The speed test could not be completed for this site.', 'Ujian kelajuan tidak dapat disiapkan untuk laman ini.')}</p>`}
+    ${m && m.field && m.field.lcp ? `<p class="rp-sum">${W(`Real visitors on Chrome over the last 28 days: main content appears in ${(m.field.lcp.value / 1000).toFixed(1)} s${m.field.overall ? `, rated ${{ FAST: 'fast', AVERAGE: 'average', SLOW: 'slow' }[m.field.overall] || 'unrated'} overall` : ''}.`, `Pelawat sebenar di Chrome dalam 28 hari lepas: kandungan utama muncul dalam ${(m.field.lcp.value / 1000).toFixed(1)} s${m.field.overall ? `, dinilai ${{ FAST: 'pantas', AVERAGE: 'sederhana', SLOW: 'perlahan' }[m.field.overall] || 'belum dinilai'} secara keseluruhan` : ''}.`)}</p>` : ''}
 
-    <h2>What is working well</h2>
-    ${r.strengths.length ? `<ul class="rp-good">${r.strengths.map(x => `<li>${esc(x)}</li>`).join('')}</ul>` : '<p>Nothing stood out as a strength on the things we can measure.</p>'}
+    <h2>${W('Design', 'Reka bentuk')}</h2>
+    <div class="rp-box"><h3>${dotted(dz.tone, esc(T(dz.label)))}</h3><p>${esc(int ? dz.note : W('This comes from our checks for design that looks dated or broken.', 'Ini berdasarkan semakan kami terhadap reka bentuk yang nampak ketinggalan zaman atau rosak.'))}</p>
+      ${r.palette && r.palette.length ? `<p class="rp-swatches">${W('Main colours on the first screen:', 'Warna utama pada skrin pertama:')} ${r.palette.map(p => `<span><i style="background:${esc(p.hex)}"></i>${esc(p.hex.toUpperCase())}</span>`).join('')}</p>` : ''}</div>
+    ${looks.length ? AREAS.map(a => { const list = looks.filter(x => areaOf(x) === a); return list.length ? `<div class="rp-area"><h4>${T(a)}</h4>${list.map(x => `<p><b>${esc(T(x.title))}.</b> ${esc(T(x.detail))} <i>${esc(T(x.fix))}</i></p>`).join('')}</div>` : ''; }).join('') : ''}
+    ${int && r.ai && r.ai.review && !r.ai.sample ? `<div class="rp-box" style="margin-top:10pt"><h3>AI design opinion: ${esc(AI_CALL[r.ai.review.dated] || '')}</h3><p>${esc(r.ai.review.impression)}</p>${reasons((r.ai.review.points || []).map(p => `${p.area}: ${p.saw} ${p.do}`))}<p><b>A way to open the conversation:</b> ${esc(r.ai.review.pitch)}</p></div>` : ''}
+    ${r.ideas && r.ideas.length ? `<h2>${W('More ideas worth considering', 'Idea lain yang wajar dipertimbangkan')}</h2><div class="rp-ideas">${r.ideas.map(i => `<p><b>${esc(T(i.title))}.</b> ${esc(T(i.text))}</p>`).join('')}</div>` : ''}
 
-    <h2>What we found</h2>
-    ${r.issues.length ? `<table><thead><tr><th>Finding</th><th>Severity</th><th>Found on</th><th>What we would do</th></tr></thead><tbody>
-      ${r.issues.map(f => `<tr><td style="width:40%"><b>${esc(f.title)}</b><br><span class="d">${esc(f.detail)}</span></td><td>${dotted(SEV[f.sev], f.sev)}</td><td>${esc(f.where)}</td><td>${esc(f.fix)}</td></tr>`).join('')}</tbody></table>` : '<p>No issues found on the things we can measure.</p>'}
+    <h2>${W('What is working well', 'Apa yang sudah bagus')}</h2>
+    ${r.strengths.length ? `<ul class="rp-good">${r.strengths.map(x => `<li>${esc(T(x))}</li>`).join('')}</ul>` : `<p>${W('Nothing stood out as a strength on the things we can measure.', 'Tiada kekuatan yang menonjol pada perkara yang kami boleh ukur.')}</p>`}
 
-    <h2>Technology</h2>
-    ${int ? '' : `<p>${built ? `The site runs on ${esc(built)}${theme ? `, using the ${esc(theme)} theme` : ''}.` : 'The platform could not be detected from the public pages.'}${host ? ` Hosting: ${esc(host)}.` : ''}</p>`}
-    <div class="rp-box" style="margin-top:8pt"><h3>${esc(v.title)}</h3>${reasons(v.reasons)}</div>
+    <h2>${W('What we found', 'Apa yang kami temui')}</h2>
+    ${looks.length ? `<p class="rp-note">${W('Design findings are in the Design section above, so they are not repeated here.', 'Penemuan reka bentuk ada dalam bahagian Reka bentuk di atas, jadi ia tidak diulang di sini.')}</p>` : ''}
+    ${r.issues.length ? `<table><thead><tr><th>${W('Finding', 'Penemuan')}</th><th>${W('Severity', 'Tahap')}</th><th>${W('Found on', 'Ditemui di')}</th><th>${W('What we would do', 'Apa yang kami akan buat')}</th></tr></thead><tbody>
+      ${r.issues.filter(f => f.cat !== 'Design').map(f => `<tr><td style="width:40%"><b>${esc(T(f.title))}</b><br><span class="d">${esc(T(f.detail))}</span></td><td>${dotted(SEV[f.sev], sev(f.sev))}</td><td>${esc(T(f.where))}</td><td>${esc(T(f.fix))}</td></tr>`).join('')}</tbody></table>` : `<p>${W('No issues found on the things we can measure.', 'Tiada isu ditemui pada perkara yang kami boleh ukur.')}</p>`}
+
+    <h2>${W('Technology', 'Teknologi')}</h2>
+    ${int ? '' : `<p>${built ? W(`The site runs on ${esc(built)}${theme ? `, using the ${esc(theme)} theme` : ''}.`, `Laman ini dibina dengan ${esc(built)}${theme ? `, menggunakan tema ${esc(theme)}` : ''}.`) : W('The platform could not be detected from the public pages.', 'Platform tidak dapat dikesan daripada halaman awam.')}${host ? ` ${W('Hosting', 'Pengehosan')}: ${esc(host)}.` : ''}</p>`}
+    <div class="rp-box" style="margin-top:8pt"><h3>${esc(T(v.title))}</h3>${reasons(v.reasons.map(T))}</div>
     ${int && r.stack.tried ? `<p class="rp-cap" style="margin-top:8pt">How we checked</p>${reasons(r.stack.tried)}` : ''}
     ${int && r.stack.items.length ? `<table style="margin-top:10pt"><thead><tr><th>Component</th><th>Type</th><th>Version</th><th>Status</th><th>Confidence</th></tr></thead><tbody>
-      ${r.stack.items.map(i => `<tr><td><b>${esc(i.name)}</b></td><td>${i.group}</td><td>${esc(i.version || '\u2013')}</td><td>${i.note ? dotted(i.status, esc(i.note)) : ''}</td><td>${i.conf}</td></tr>`).join('')}</tbody></table>` : ''}
+      ${r.stack.items.map(i => `<tr><td><b>${esc(i.name)}</b></td><td>${i.group}</td><td>${esc(i.version || '–')}</td><td>${i.note ? dotted(i.status, esc(i.note)) : ''}</td><td>${i.conf}</td></tr>`).join('')}</tbody></table>` : ''}
 
-    <h2>Recommended next steps</h2>
-    <div class="rp-cols">${stepsHtml(r, int)}</div>
-    <p class="rp-foot"><img class="rp-logo" src="img/mysense-light.png" alt="MYSense">Prepared by MYSense, mysense.com.my. ${r.pagesChecked ? `${r.pagesChecked} public ${r.pagesChecked === 1 ? 'page was' : 'pages were'} checked on ${fmt(r.date)}. ` : ''}Speed scores come from Google PageSpeed Insights (Lighthouse); lab results vary slightly between runs. Technology is read from public page code, so hidden components may not appear.</p>`;
+    <h2>${W('Recommended next steps', 'Langkah seterusnya yang disyorkan')}</h2>
+    <div class="rp-cols">${stepsHtml(r, int, T, groupNames)}</div>
+    ${int ? budgetHtml(r) : ''}
+    <p class="rp-foot"><img class="rp-logo" src="img/mysense-light.png" alt="MYSense">${W(`Prepared by MYSense, mysense.com.my. ${r.pagesChecked ? `${r.pagesChecked} public ${r.pagesChecked === 1 ? 'page was' : 'pages were'} checked on ${day(r.date)}. ` : ''}Speed scores come from Google PageSpeed Insights (Lighthouse); lab results vary slightly between runs. Technology is read from public page code, so hidden components may not appear.`,
+      `Disediakan oleh MYSense, mysense.com.my. ${r.pagesChecked ? `${r.pagesChecked} halaman awam disemak pada ${day(r.date)}. ` : ''}Skor kelajuan datang daripada Google PageSpeed Insights (Lighthouse); keputusan makmal berbeza sedikit antara ujian. Teknologi dibaca daripada kod halaman awam, jadi komponen tersembunyi mungkin tidak kelihatan.`)}</p>`;
 }
-function printReport(mode) {
+function printReport(mode, o = {}) {
   if (!S.result) return;
-  buildReport(mode);
-  document.title = `SenseCheck ${mode === 'internal' ? 'Internal Audit' : 'Report'} - ${S.result.domain}`;
+  buildReport(mode, o);
+  document.title = `SenseCheck ${mode === 'internal' ? 'Internal Audit' : o.lang === 'bm' ? 'Laporan' : 'Report'} - ${S.result.domain}`;
   const theme = document.documentElement.dataset.theme || 'light';
   document.documentElement.dataset.theme = 'light'; // PDFs always print light
   Promise.all([...document.querySelectorAll('#report img')].map(i => (i.decode ? i.decode().catch(() => {}) : 0))).then(() => { window.print(); setTimeout(() => { document.title = 'SenseCheck'; document.documentElement.dataset.theme = theme; }, 500); });
@@ -630,7 +991,7 @@ function drawUser() {
   el.innerHTML = `<span class="avatar">${esc(name.slice(0, 2).toUpperCase())}</span><span class="me"><b title="${esc(name)}">${esc(name)}</b><small>${ME.email ? (ME.admin ? 'Admin' : 'Signed in') : 'Sales tools'}</small>${ME.local ? `<label class="dev">Local preview, signed in as<select id="devuser">${ME.users.map(u => `<option${u === ME.email ? ' selected' : ''}>${esc(u)}</option>`).join('')}</select></label>` : ''}</span>`;
 }
 function go(to) {
-  if (to.startsWith('pdf-')) return printReport(to.slice(4));
+  if (to.startsWith('pdf-')) return pdfDialog(to.slice(4));
   if (S.busy) return toast('A scan is still running.');
   if (to === 'new' || to === 'history') { S.route = to; render(); window.scrollTo(0, 0); return; }
   if (!S.result) return;
@@ -640,15 +1001,26 @@ function go(to) {
 }
 
 document.addEventListener('click', e => {
-  const t = e.target.closest('[data-go],[data-open],[data-remove],[data-rescan],#more');
+  const t = e.target.closest('[data-go],[data-open],[data-remove],[data-rescan],[data-act],#more');
   if (!t) return;
+  if (t.dataset.act) return act(t.dataset.act);
   if (t.dataset.go) { e.preventDefault(); go(t.dataset.go); }
   else if (t.dataset.open) H.get(t.dataset.open).then(r => r && open(r)).catch(e => toast(e.message));
   else if (t.dataset.remove) H.remove(t.dataset.remove).then(render).catch(e => toast(e.message));
   else if ('rescan' in t.dataset) runScan(S.result.url);
   else if (t.id === 'more') { S.more = !S.more; drawRows(); }
 });
-document.addEventListener('submit', e => { if (e.target.id === 'f') { e.preventDefault(); runScan($('#u').value); } });
+document.addEventListener('submit', e => {
+  e.preventDefault();
+  if (e.target.id === 'f') runScan($('#u').value);
+  if (e.target.id === 'rival-f') { const v = $('#rival-u').value.trim(); if (!v) return toast('Paste the competitor\u2019s link first.'); closeModal(); runScan(v, { vsFor: S.result }); }
+  if (e.target.id === 'pdf-f') {
+    const o = { client: $('#pdf-for').value.trim(), by: $('#pdf-by').value.trim(), lang: ($('#pdf-lang') || {}).value || 'en' }, mode = e.target.dataset.mode;
+    try { localStorage.setItem('sensecheck.by', o.by); } catch { /* storage unavailable */ }
+    S.result.clientName = o.client;
+    closeModal(); printReport(mode, o);
+  }
+});
 document.addEventListener('change', e => {
   if (e.target.id === 'cat') { S.cat = e.target.value; S.more = false; drawRows(); }
   if (e.target.id === 'max') S.max = +e.target.value;

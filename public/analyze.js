@@ -125,7 +125,7 @@ export function detectStack(page, probes = {}, latest = {}) {
   const ns = probes.namespaces || [];
   const items = [];
   const add = (group, name, version = '', status = 'info', note = '', conf = 'High') => items.push({ group, name, version, status, note, conf });
-  const out = { platform: null, wp: null, builder: null, elementor: null, items, verdict: null, themeSlug: '', pluginSlugs: [], outdatedPlugins: [] };
+  const out = { platform: null, wp: null, builder: null, elementor: null, items, verdict: null, themeSlug: '', pluginSlugs: [], outdatedPlugins: [], vulns: [] };
 
   const hints = probes.paths || {}, robots = probes.robots || '', dns = probes.dns || {};
   const seenWP = /\/wp-(content|includes)\//i.test(h) || !!gen(/^WordPress/i) || /wp-json/i.test(H.link || '') || ns.length > 0;
@@ -163,12 +163,16 @@ export function detectStack(page, probes = {}, latest = {}) {
     const plugins = new Map();
     for (const m of h.matchAll(/wp-content\/plugins\/([\w-]+)\/[^"'\s?]*(?:\?ver=(\d[\w.]*))?/gi)) if (!plugins.get(m[1])) plugins.set(m[1], m[2] || '');
     if (ns.some(n => /^wc\//.test(n))) plugins.has('woocommerce') || plugins.set('woocommerce', '');
-    const pv = probes.plugins || {};
+    const pv = probes.plugins || {}, vl = probes.vulns || {};
+    if (vl.core) out.vulns.push({ name: 'WordPress', version: v, ...vl.core });
+    if (vl.elementor && out.elementor) out.vulns.push({ name: 'Elementor', version: out.elementor.version, ...vl.elementor });
     out.pluginSlugs = [...plugins.keys()].filter(sl => !/^(elementor|elementor-pro|js_composer)$/.test(sl)).slice(0, 18);
     for (const slug of out.pluginSlugs) {
       const p = pv[slug] || {}, name = PLUGINS[slug] || pretty(slug), known = p.version && p.latest, old = known && cmp(p.version, p.latest) < 0;
       if (old) out.outdatedPlugins.push(`${name} ${p.version} (latest ${p.latest})`);
-      add('Plugins', name, p.version || '', old ? 'warn' : known ? 'good' : 'info', old ? `Update available (latest ${p.latest})` : known ? 'Up to date' : '', p.version ? 'Medium' : 'High');
+      const hole = vl[slug];
+      if (hole) out.vulns.push({ name, version: p.version, ...hole });
+      add('Plugins', name, p.version || '', hole ? 'bad' : old ? 'warn' : known ? 'good' : 'info', hole ? `At least ${hole.count} known security ${hole.count === 1 ? 'hole' : 'holes'}${hole.fixed ? `, fixed in ${hole.fixed}` : ''}` : old ? `Update available (latest ${p.latest})` : known ? 'Up to date' : '', p.version ? 'Medium' : 'High');
     }
   } else {
     let hit = PLATFORMS.find(([, , , re, g, hd = [], ck]) => (re && re.test(h)) || (g && gen(g)) || hd.some(k => H[k]) || (ck && ck.test(cookies)));
@@ -189,6 +193,7 @@ export function detectStack(page, probes = {}, latest = {}) {
   // Domain, hosting and server
   if (dns.ns && dns.ns.length) add('Hosting', `DNS: ${dns.host || dns.ns[0]}`, '', 'info', dns.host ? '' : 'Nameserver', 'High');
   if (probes.domain) { const d = out.domain = probes.domain; add('Domain', d.name, '', d.soon ? 'warn' : 'info', d.expires ? `${d.registrar ? d.registrar.replace(/\.$/, '') + '. ' : ''}Expires ${d.expiresText}` : 'Registrar and expiry not detected', d.expires ? 'High' : 'Low'); }
+  if (probes.ssl) { out.ssl = probes.ssl; add('Domain', 'Security certificate (SSL)', '', probes.ssl.soon ? 'warn' : 'good', `Valid until ${probes.ssl.expiresText}`, 'Medium'); }
   const server = H.server || '';
   if (server) add('Hosting', server.split(/[\/ (]/)[0].replace(/^\w/, c => c.toUpperCase()), (server.match(/\/(\d[\d.]*)/) || [])[1] || '');
   if (H['cf-ray'] && !/cloudflare/i.test(server)) add('Hosting', 'Cloudflare');
@@ -225,6 +230,33 @@ export function detectStack(page, probes = {}, latest = {}) {
 
   out.verdict = stackVerdict(out);
   return out;
+}
+
+// Known security holes for one component, from the public WPVulnerability database (free, no key).
+// `v` is the installed version. A plugin entry counts only when its version range covers `v`; the WordPress
+// core list is already for one exact version. The same hole is often listed several times by different sources,
+// so only distinct CVE numbers are counted. That makes the count a safe minimum ("at least N"), never an overcount.
+export function vulnsFor(json, v, core) {
+  let list;
+  try { list = (JSON.parse(json).data || {}).vulnerability || []; } catch { return null; }
+  if (!v || !list.length) return null;
+  const SEV = ['low', 'medium', 'high', 'critical'], cves = new Set();
+  let worst = -1, fixed = '', hits = 0;
+  for (const x of list) {
+    const o = x.operator || {};
+    if (!core) {
+      if (o.max_version && !(o.max_operator === 'le' ? cmp(v, o.max_version) <= 0 : cmp(v, o.max_version) < 0)) continue;
+      if (o.min_version && !(o.min_operator === 'gt' ? cmp(v, o.min_version) > 0 : cmp(v, o.min_version) >= 0)) continue;
+      if (!o.max_version && o.unfixed !== '1') continue;
+    }
+    hits++;
+    const cve = (x.source || []).find(k => /^CVE-/.test(k.id || ''));
+    if (cve) cves.add(cve.id);
+    if (!core && o.max_version && o.max_operator !== 'le' && (!fixed || cmp(o.max_version, fixed) > 0)) fixed = o.max_version;
+    const c = (x.impact || {}).cvss3 || (x.impact || {}).cvss || {}, sv = SEV.indexOf({ c: 'critical', h: 'high', m: 'medium', l: 'low' }[c.severity] || String(c.severity || '').toLowerCase());
+    if (sv > worst) worst = sv;
+  }
+  return hits ? { count: cves.size || 1, worst: SEV[worst] || '', fixed } : null;
 }
 
 function stackVerdict(s) {
@@ -296,7 +328,8 @@ export function summarisePsi(j) {
   const num = id => (A[id] && A[id].numericValue != null ? Math.round(A[id].numericValue) : null), saveKb = id => (A[id] && A[id].details && A[id].details.overallSavingsBytes ? Math.round(A[id].details.overallSavingsBytes / 1024) : 0);
   const why = { bytes, ttfb: num('server-response-time'), unusedJs: saveKb('unused-javascript'), unusedCss: saveKb('unused-css-rules') };
   const design = { contrast: cnt('color-contrast'), taps: cnt('target-size'), stretched: cnt('image-aspect-ratio'), blurry: cnt('image-size-responsive') };
-  return { urls, why, design, scores, metrics, wins, field, shot: (A['final-screenshot'] && A['final-screenshot'].details && A['final-screenshot'].details.data) || '', packs: (lh.stackPacks || []).map(p => p.title), weight: A['total-byte-weight'] && A['total-byte-weight'].numericValue ? Math.round(A['total-byte-weight'].numericValue / 1024) : null };
+  const fps = lh.fullPageScreenshot && lh.fullPageScreenshot.screenshot;
+  return { urls, why, design, scores, metrics, wins, field, full: (fps && fps.data) || '', shot: (A['final-screenshot'] && A['final-screenshot'].details && A['final-screenshot'].details.data) || '', packs: (lh.stackPacks || []).map(p => p.title), weight: A['total-byte-weight'] && A['total-byte-weight'].numericValue ? Math.round(A['total-byte-weight'].numericValue / 1024) : null };
 }
 
 // ---------- Why a site could not be read, in specific terms. Returns null when the page was read normally.
