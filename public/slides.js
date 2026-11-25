@@ -4,6 +4,7 @@
 // Google Slides and every piece can be edited. Sizes are in inches on a 13.33 x 7.5 slide.
 import { tr } from './bm.js';
 import { speedPlan, CATS, CAT_NAME } from './audit.js';
+import { activityOf, cwvOf, stabilityOf, seoOf, postChecks } from './extra.js';
 import { techBrand, techSvg } from './techicons.js';
 
 const C = { bg: 'F7F5F0', card: 'FFFFFF', line: 'E8E5DD', soft: 'F3F1EA', ink: '16171B', ink2: '55575E', muted: '93959D', purple: '812FDF', pink: 'F65D8C', yellow: 'FCD61C',
@@ -223,6 +224,76 @@ export async function makeSlides(r, mode, o, k) {
       const th = ch - 1.1, half = th / 2;
       text(s, [{ text: fit(T(j.why), cw - 0.6, half, 11.5), options: { breakLine: true, paraSpaceAfter: 4 } }, { text: fit(T(j.how), cw - 0.6, half - 0.1, 11.5), options: { color: C.ink } }], { x: x + 0.3, y: y + 0.95, w: cw - 0.6, h: th, fontSize: 11.5, color: C.ink2 });
     });
+  }
+
+  // ---- website activity, vitals and stability, SEO score, one post up close
+  const lang = bm ? 'bm' : 'en', TN = { good: C.good, warn: C.warn, bad: C.bad, info: C.mid, mid: C.mid };
+  const A = r.activity;
+  if (A && A.source) {
+    const a = activityOf(r, lang), s = slide(M('Website activity', 'Aktiviti laman web'), a.line);
+    const tiles = [[M('New posts, last 12 months', 'Artikel baharu, 12 bulan lepas'), String(a.posts12), C.t1], [M('Last new post', 'Artikel baharu terakhir'), A.lastPost ? new Date(A.lastPost).toLocaleDateString(bm ? 'ms-MY' : 'en-GB', { day: 'numeric', month: 'short', year: 'numeric' }) : M('None', 'Tiada'), C.t3], [M('New pages, last 3 months', 'Halaman baharu, 3 bulan lepas'), String(a.newPages), C.t4]];
+    pill(s, a.label, L, 1.75, a.tone);
+    tiles.forEach(([t, v, tint], i) => { const y = 2.3 + i * 1.42; box(s, L, y, 3.6, 1.25, tint, null); text(s, t, { x: L + 0.25, y: y + 0.15, w: 3.1, h: 0.3, fontSize: 11, color: C.ink2, valign: 'middle' }); text(s, v, { x: L + 0.25, y: y + 0.5, w: 3.1, h: 0.55, fontSize: 24, bold: true, valign: 'middle', fit: 'shrink' }); });
+    // the month chart, drawn with plain shapes
+    const x0 = L + 4.0, w0 = IN - 4.0; box(s, x0, 1.7, w0, 4.9);
+    dot(s, x0 + 0.35, 1.97, C.purple); text(s, M('Posts', 'Artikel'), { x: x0 + 0.55, y: 1.9, w: 1.2, h: 0.28, fontSize: 10.5, color: C.ink2, valign: 'middle' });
+    dot(s, x0 + 1.55, 1.97, C.pink); text(s, M('Pages', 'Halaman'), { x: x0 + 1.75, y: 1.9, w: 1.2, h: 0.28, fontSize: 10.5, color: C.ink2, valign: 'middle' });
+    const top = Math.max(4, ...A.months.map(q => Math.max(q.posts, q.pages))), base = 6.05, ph = 3.5, gw = (w0 - 0.7) / 12, bw = Math.min(0.2, gw * 0.3);
+    const MON = bm ? ['Jan', 'Feb', 'Mac', 'Apr', 'Mei', 'Jun', 'Jul', 'Ogo', 'Sep', 'Okt', 'Nov', 'Dis'] : ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    s.addShape(S.line, { x: x0 + 0.35, y: base, w: w0 - 0.7, h: 0, line: { color: C.line, width: 0.75 } });
+    A.months.forEach((q, i) => {
+      const cx = x0 + 0.35 + gw * i + gw / 2;
+      [[q.posts, C.purple, cx - bw - 0.02], [q.pages, C.pink, cx + 0.02]].forEach(([v, colour, bx]) => { if (!v) return; const bh = Math.max(0.05, (ph * v) / top); s.addShape(S.roundRect, { x: bx, y: base - bh, w: bw, h: bh, rectRadius: Math.min(0.04, bh / 2), fill: { color: colour } }); text(s, v, { x: bx - 0.15, y: base - bh - 0.24, w: bw + 0.3, h: 0.22, fontSize: 9, bold: true, align: 'center', valign: 'middle' }); });
+      text(s, MON[+q.k.slice(5) - 1], { x: cx - gw / 2, y: base + 0.08, w: gw, h: 0.26, fontSize: 9.5, color: C.ink2, align: 'center', valign: 'middle' });
+    });
+  }
+  const cw = cwvOf(r, lang), st = r.stab ? stabilityOf(r, lang, !!k.trouble) : null;
+  if (cw.items.length || st) {
+    const s = slide(M('Core Web Vitals and stability', 'Core Web Vitals dan kestabilan'), M('How the site feels to use, and how likely it is to break', 'Bagaimana rasanya menggunakan laman ini, dan sejauh mana ia mudah rosak'));
+    const half = (IN - 0.3) / 2;
+    if (cw.items.length) {
+      box(s, L, 1.7, half, 4.9);
+      text(s, 'Core Web Vitals', { x: L + 0.3, y: 1.9, w: 3, h: 0.35, fontSize: 15, bold: true, valign: 'middle' }); pill(s, cw.label, L + half - 1.9, 1.92, cw.tone, 1.6);
+      text(s, fit(cw.line, half - 0.6, 0.75, 11), { x: L + 0.3, y: 2.38, w: half - 0.6, h: 0.75, fontSize: 11, color: C.ink2 });
+      cw.items.forEach((i, n) => { const y = 3.3 + n * 1.05; box(s, L + 0.3, y, half - 0.6, 0.9, SOFT[i.tone] || C.soft, null, 0.15); text(s, i.name, { x: L + 0.5, y: y + 0.1, w: half - 2.6, h: 0.32, fontSize: 11.5, bold: true, valign: 'middle', fit: 'shrink' }); text(s, `${M('Good is', 'Baik jika')} ${i.aim}`, { x: L + 0.5, y: y + 0.46, w: half - 2.6, h: 0.3, fontSize: 10, color: C.ink2, valign: 'middle' }); text(s, i.value, { x: L + half - 2.1, y: y + 0.15, w: 1.6, h: 0.6, fontSize: 20, bold: true, color: TN[i.tone], align: 'right', valign: 'middle' }); });
+    }
+    if (st) {
+      const x = cw.items.length ? L + half + 0.3 : L, w = cw.items.length ? half : IN;
+      box(s, x, 1.7, w, 4.9);
+      text(s, M('Stability', 'Kestabilan'), { x: x + 0.3, y: 1.9, w: 3, h: 0.35, fontSize: 15, bold: true, valign: 'middle' }); pill(s, st.label, x + w - 1.9, 1.92, st.tone, 1.6);
+      text(s, fit(st.line, w - 0.6, 0.75, 11), { x: x + 0.3, y: 2.38, w: w - 0.6, h: 0.75, fontSize: 11, color: C.ink2 });
+      st.rows.slice(0, 7).forEach((row, n) => { const y = 3.25 + n * 0.46; dot(s, x + 0.32, y + 0.12, TN[row.tone], 0.13); text(s, fit(row.text, w - 0.95, 0.4, 11), { x: x + 0.58, y, w: w - 0.9, h: 0.38, fontSize: 11, valign: 'middle' }); });
+    }
+  }
+  const so = seoOf(r, lang);
+  if (so) {
+    const s = slide(M('SEO score', 'Skor SEO'), M('How easy it is for Google to find, read and rank the site', 'Sejauh mana mudah Google menemui, membaca dan menyusun laman ini'));
+    box(s, L, 1.7, 3.4, 4.9, C.ink, null, 0.3);
+    text(s, so.score, { x: L + 0.35, y: 2.1, w: 2.7, h: 1.2, fontSize: 64, bold: true, color: 'FFFFFF', valign: 'middle' });
+    text(s, M('out of 100', 'daripada 100'), { x: L + 0.38, y: 3.3, w: 2.7, h: 0.3, fontSize: 13, color: 'A9ABB4', valign: 'middle' });
+    pill(s, so.label, L + 0.35, 3.85, so.tone, 2.6);
+    if (wave) image(s, thumbs || wave, L + 0.6, 4.4, 2.2, 2.05);
+    const parts = so.parts.filter(q => q.score != null), x = L + 3.7, w = IN - 3.7, rh = Math.min(0.68, 4.9 / parts.length);
+    box(s, x, 1.7, w, 4.9);
+    parts.forEach((q, n) => { const y = 1.9 + n * rh; text(s, q.name, { x: x + 0.3, y, w: 3.1, h: 0.3, fontSize: 12, bold: true, valign: 'middle', fit: 'shrink' }); s.addShape(S.roundRect, { x: x + 3.5, y: y + 0.11, w: 2.2, h: 0.1, rectRadius: 0.05, fill: { color: C.soft } }); s.addShape(S.roundRect, { x: x + 3.5, y: y + 0.11, w: Math.max(0.1, 2.2 * q.score / 100), h: 0.1, rectRadius: 0.05, fill: { color: C[htone(q.score)] } }); text(s, q.score, { x: x + 5.8, y, w: 0.5, h: 0.3, fontSize: 12, bold: true, align: 'right', valign: 'middle' }); text(s, fit(q.line, w - 0.6, rh - 0.32, 10), { x: x + 0.3, y: y + 0.3, w: w - 0.6, h: rh - 0.32, fontSize: 10, color: C.ink2 }); });
+  }
+  const pp = r.post;
+  if (pp) {
+    const word = pp.kind === 'page' ? M('page', 'halaman') : M('post', 'artikel');
+    const fails = postChecks(pp, lang).filter(c => !c.ok).sort((a, b) => b.w - a.w).slice(0, 4);
+    const s = slide(M(`Is this ${word} SEO friendly?`, `Adakah ${word} ini mesra SEO?`), pp.kind === 'page' ? M('There’s no blog, so here’s the weakest page', 'Tiada blog, jadi ini halaman yang paling lemah') : M(`The weakest of the ${pp.sample} blog posts we read, ${pp.score} out of 100`, `Yang paling lemah daripada ${pp.sample} artikel yang kami baca, ${pp.score} daripada 100`));
+    box(s, L, 1.7, 5.6, 2.1);
+    let crumb = pp.url; try { const u = new URL(pp.url); crumb = u.hostname.replace(/^www\./, '') + u.pathname.split('/').filter(Boolean).map(q => ' › ' + decodeURIComponent(q)).join(''); } catch { /* keep the link */ }
+    text(s, fit(crumb, 5, 0.25, 10), { x: L + 0.3, y: 1.9, w: 5, h: 0.25, fontSize: 10, color: '4D5156', valign: 'middle' });
+    text(s, fit(pp.title || '(no title)', 5, 0.62, 15), { x: L + 0.3, y: 2.2, w: 5, h: 0.62, fontSize: 15, color: '1A0DAB' });
+    text(s, fit(pp.desc || M('No description, so Google picks some text from the page.', 'Tiada penerangan, jadi Google memilih teks daripada halaman.'), 5, 0.8, 10.5), { x: L + 0.3, y: 2.88, w: 5, h: 0.8, fontSize: 10.5, color: '4D5156' });
+    const kw = (pp.kw && pp.kw.suggest) || [];
+    box(s, L, 4.0, 5.6, 2.6, C.t2, null);
+    text(s, M('Words people search for', 'Perkataan yang dicari orang'), { x: L + 0.3, y: 4.2, w: 5, h: 0.32, fontSize: 13, bold: true, valign: 'middle' });
+    text(s, kw.length ? kw.slice(0, 6).map(q => ({ text: q, options: { bullet: { indent: 12 }, breakLine: true } })) : fit(pp.focus ? M(`Start with “${pp.focus}” in the title, description and first lines.`, `Mulakan dengan “${pp.focus}” dalam tajuk, penerangan dan ayat pertama.`) : '', 5, 1.6, 11.5), { x: L + 0.3, y: 4.6, w: 5, h: 1.9, fontSize: 11.5, color: C.ink });
+    const x = L + 5.9, w = IN - 5.9, ch = fails.length ? Math.min(1.15, (4.9 - 0.12 * (fails.length - 1)) / fails.length) : 1;
+    if (!fails.length) { box(s, x, 1.7, w, 4.9, C.goodSoft, null); text(s, M('It ticks every box we check.', 'Ia memenuhi semua semakan kami.'), { x: x + 0.3, y: 2, w: w - 0.6, h: 0.5, fontSize: 15, bold: true }); }
+    fails.forEach((c, n) => { const y = 1.7 + n * (ch + 0.12); box(s, x, y, w, ch); dot(s, x + 0.25, y + 0.2, C.pink, 0.14); text(s, fit(c.title, w - 0.8, 0.3, 12.5), { x: x + 0.5, y: y + 0.12, w: w - 0.8, h: 0.3, fontSize: 12.5, bold: true, valign: 'middle' }); text(s, fit(`${c.saw} ${c.fix}`, w - 0.8, ch - 0.5, 10.5), { x: x + 0.5, y: y + 0.44, w: w - 0.8, h: ch - 0.5, fontSize: 10.5, color: C.ink2 }); });
   }
 
   // ---- 7. design

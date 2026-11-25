@@ -2,6 +2,7 @@ import { tr } from './bm.js';
 import { detectStack, summarisePsi, diagnose, dnsClues, vulnsFor } from './analyze.js';
 import { techIcon } from './techicons.js';
 import { movePill, moveThumbs, sheetIn, sheetOut, sheetDrag, fly, resize, countUp, watchScroll, crossFade } from './motion.js';
+import { readActivity, activityOf, cwvOf, cruxFrom, trendSvg, readStability, stabilityOf, seoFacts, seoOf, postFacts, postChecks, postScore, pickPosts, suggestFor } from './extra.js';
 import { readPage, buildIssues, healthOf, strengthsOf, skillsFit, nextSteps, verdictOf, whyOf, ideasOf, speedPlan, designOf as designVerdict, norm, CATS, CAT_NAME } from './audit.js';
 
 const CFG = await fetch('config.json').then(r => r.json());
@@ -31,6 +32,8 @@ const I = {
   versus: '<path d="M6.5 20V10M12 20V4M17.5 20v-7"/>',
   spark: '<path d="M12 4l1.9 5.1L19 11l-5.1 1.9L12 18l-1.9-5.1L5 11l5.1-1.9z"/>',
   x: '<path d="M6.5 6.5l11 11M17.5 6.5l-11 11"/>',
+  pulse: '<path d="M3 12h4l2.5-6 4 12 2.5-6H21"/>',
+  seo: '<circle cx="10.5" cy="10.5" r="6"/><path d="M15 15l5 5M8 10.5l1.8 1.8L13 9"/>',
 };
 const icon = n => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${I[n]}</svg>`;
 // The SenseCheck mascot. Poses: wave, point, inspect, underline, thumbs, clipboard, run, shrug, coffee.
@@ -183,6 +186,8 @@ const smType = u => {
 async function readSitemap(origin, robotsText) {
   const listed = [...(robotsText || '').matchAll(/^\s*sitemap:\s*(\S+)/gim)].map(m => m[1]);
   const locs = t => [...t.matchAll(/<loc>\s*(?:<!\[CDATA\[)?\s*([^<\]\s]+)/gi)].map(m => m[1].replace(/&amp;/g, '&'));
+  // each page in a sitemap, with the date it last changed when the sitemap gives one
+  const entries = t => [...t.matchAll(/<url>([\s\S]*?)<\/url>/gi)].map(m => ({ href: (locs(m[1])[0] || ''), mod: (m[1].match(/<lastmod>\s*(?:<!\[CDATA\[)?\s*([^<\]\s]+)/i) || [])[1] || '' })).filter(e => e.href);
   let first = '';
   for (const u of [...listed, origin + '/sitemap.xml', origin + '/sitemap_index.xml', origin + '/wp-sitemap.xml'].slice(0, 5)) {
     first = body(await soft(u));
@@ -196,8 +201,8 @@ async function readSitemap(origin, robotsText) {
     const rank = t => (t === 'page' ? 0 : 1);
     const pick = [...kids.filter(k => k.type !== 'post').sort((a, b) => rank(a.type) - rank(b.type)).slice(0, 8), ...kids.filter(k => k.type === 'post').slice(0, 3)];
     more = pick.length < kids.length;
-    (await pool(pick, 2, k => soft(k.u))).forEach((x, i) => { for (const href of locs(body(x))) list.push({ href, type: pick[i].type }); });
-  } else list = locs(first).map(href => ({ href, type: '' }));
+    (await pool(pick, 2, k => soft(k.u))).forEach((x, i) => { for (const e of entries(body(x))) list.push({ ...e, type: pick[i].type }); });
+  } else list = entries(first).map(e => ({ ...e, type: '' }));
   const host = new URL(origin).hostname.replace(/^www\./, ''), seen = new Set();
   const urls = list.filter(x => { try { if (new URL(x.href).hostname.replace(/^www\./, '') !== host || seen.has(x.href)) return false; seen.add(x.href); return true; } catch { return false; } });
   urls.more = more; // some sitemap files were not read, so the blog post count is a minimum
@@ -282,7 +287,7 @@ async function crawl(home, cap, skip, sitemap, ui) {
   if (named.length > 4) notes.push(`${named.length - 4} other big ${named.length === 5 ? 'section was' : 'sections were'} sampled the same way.`);
   if (big(loose)) notes.push(`${loose.found} more pages aren’t linked from the homepage, so we checked ${loose.done} of them as a sample.`);
   if (stopped && cap > 1) notes.push(`We stopped at ${pages.length} pages to keep the wait reasonable. About ${stopped} more were not checked.`);
-  return { pages, broken, skipped, cover: notes };
+  return { pages, broken, skipped, cover: notes, postUrls: [...posts].slice(0, 40) };
 }
 
 // When the site's security certificate runs out, read from public certificate logs (the latest one issued).
@@ -368,6 +373,35 @@ async function paletteOf(src) {
   } catch { return []; }
 }
 
+// ---------- activity, vitals history and the close look at one post (the rules are in extra.js)
+const NET = { soft, body, peek, sleep, pool };
+async function cruxOf(origin) {
+  try { const x = locked(await fetch('/api/crux?url=' + encodeURIComponent(origin) + '&form=phone')); return x.ok ? cruxFrom(await x.json()) : null; } catch { return null; }
+}
+// The weakest post on the site: a handful of posts are read two at a time, each is scored on the basics and the
+// lowest one is kept for the close look, with Google's search suggestions for its topic. No blog: the weakest
+// main page stands in.
+async function reviewPosts(cands, postUrls, pages) {
+  let list = pickPosts(cands.length ? cands : postUrls.map(url => ({ url, title: '', date: '' }))), kind = 'post';
+  if (!list.length) {
+    const quick = p => (!p.title ? 3 : 0) + (!p.desc ? 2 : 0) + (p.h1 !== 1 ? 2 : 0) + (p.words < 300 ? 1 : 0);
+    const pg = pages.slice(1).sort((a, b) => quick(b) - quick(a))[0] || pages[0];
+    if (!pg) return null;
+    list = [{ url: pg.url, title: pg.title }]; kind = 'page';
+  }
+  const read = [];
+  for (let i = 0; i < list.length; i += 2) {
+    const got = await Promise.all(list.slice(i, i + 2).map(c => soft(c.url)));
+    got.forEach((g, j) => { if (g && g.status === 200 && g.html) try { const f = postFacts(g.finalUrl || list[i + j].url, g.html, list[i + j]); f.score = postScore(f); read.push(f); } catch { /* a page we can't read is skipped */ } });
+    await sleep(CFG.crawl.delayMs);
+  }
+  if (!read.length) return null;
+  read.sort((a, b) => a.score - b.score);
+  const p = read[0], kw = await suggestFor(p.focus, p._text, NET).catch(() => ({ suggest: [], have: [], from: '' }));
+  for (const x of read) delete x._text;
+  return { ...p, kind, kw, sample: read.length, others: read.slice(1).map(x => ({ url: x.url, title: x.title, score: x.score })) };
+}
+
 // ---------- scan
 async function runScan(raw, opt = {}) {
   if (S.busy) return;
@@ -428,12 +462,13 @@ async function runScan(raw, opt = {}) {
   step('stack', 'done');
   sofar({ stack: [stack.platform && stack.platform.name, stack.wp && stack.wp.version, stack.builder && stack.builder.name].filter(Boolean).join(' ') });
 
-  let pages = [], broken = [], bigImages = [], skipped = 0, cover = [];
+  let pages = [], broken = [], bigImages = [], skipped = 0, cover = [], postUrls = [], activity = null, post = null;
+  const cruxP = cruxOf(origin), stabP = blocked ? null : readStability(page.finalUrl, NET);   // these run alongside the page check
   if (!blocked) {
     step('pages', 'run');
     // A first look at the homepage while the rest of the site is still being checked.
     try { const p0 = readPage(page.finalUrl, page.status, page.html, CFG); sofar({ first: buildIssues({ pages: [p0], broken: [], bigImages: [], site, stack, psi: { mobile: { error: 1 }, desktop: { error: 1 } } }, CFG).filter(i => i.sev !== 'Low').slice(0, 4).map(i => i.title) }); } catch { /* the early look is a nicety */ }
-    ({ pages, broken, skipped, cover } = await crawl(page, max, site.disallow, max > 1 ? site.sitemapUrls || [] : [], progressUi()));
+    ({ pages, broken, skipped, cover, postUrls } = await crawl(page, max, site.disallow, max > 1 ? site.sitemapUrls || [] : [], progressUi()));
     const urls = pages[0].imgUrls, sizes = await pool(urls, 3, peek);
     if (!pages[0].design.favicon) site.favicon = ((await peek(origin + '/favicon.ico')) || {}).status === 200;
     // Elementor keeps its site-wide colours in one small file. If they are still the ones it ships with, say so.
@@ -442,7 +477,16 @@ async function runScan(raw, opt = {}) {
     bigImages = sizes.map((m, i) => ({ url: urls[i], kb: m && m.headers ? Math.round((+m.headers['content-length'] || 0) / 1024) : 0 })).filter(b => b.kb > CFG.thresholds.imageKB);
     step('pages', 'done', `${pages.length} ${pages.length === 1 ? 'page' : 'pages'}${skipped ? `, ${skipped} left out` : ''}`);
     const pr = $('#prog'); if (pr) pr.hidden = true;
-  } else step('pages', 'fail', 'Skipped');
+    // How often new posts and pages appear, then a close look at the weakest blog post.
+    step('seo', 'run');
+    const isWp = (stack.platform && stack.platform.kind === 'wordpress') || (probes.namespaces || []).some(n => /^wp\/v2/.test(n));
+    const act = await readActivity(origin, isWp, site.sitemapUrls || [], NET).catch(() => ({ activity: { source: '' }, candidates: [] }));
+    activity = act.activity;
+    const llms = await soft(origin + '/llms.txt');
+    site.llms = !!llms && llms.status === 200 && !/<html/i.test(body(llms, 600)) && body(llms, 4000).trim().length > 20;
+    post = await reviewPosts(act.candidates, postUrls || [], pages).catch(() => null);
+    step('seo', 'done', post ? `${post.sample} ${post.kind === 'page' ? 'page' : post.sample === 1 ? 'post' : 'posts'} read` : 'No blog found');
+  } else { step('pages', 'fail', 'Skipped'); step('seo', 'fail', 'Skipped'); }
 
   const [mobile, desktop] = await Promise.all([pm, pd]);
   S.busy = false;
@@ -470,7 +514,10 @@ async function runScan(raw, opt = {}) {
     ] };
     if (!stack.items.some(i => i.group === 'Platform')) stack.items.unshift({ group: 'Platform', name: 'Not detected', version: '', status: 'warn', note: blocked ? 'Site could not be read' : 'No markers found', conf: 'Low' });
   }
-  const r = { id: Date.now(), url: page.finalUrl || u.href, domain, date: new Date().toISOString(), blocked, read, stack, psi: { mobile, desktop }, pages, broken, bigImages, site };
+  const tries = stabP ? await stabP : null;
+  const r = { id: Date.now(), url: page.finalUrl || u.href, domain, date: new Date().toISOString(), blocked, read, stack, psi: { mobile, desktop }, pages, broken, bigImages, site,
+    activity, post, crux: await cruxP, stab: { tries, b404: broken.filter(b => b.status < 500).length, b5xx: broken.filter(b => b.status >= 500).length, pages: pages.length },
+    seoRaw: pages.length ? seoFacts(pages, site, { llms: site.llms }) : null };
   r.issues = buildIssues(r, CFG); r.health = healthOf(r); r.strengths = strengthsOf(r); r.design = designVerdict(r); r.why = whyOf(r); r.ideas = ideasOf(r);
   r.cover = cover; r.palette = await paletteOf((good(desktop) || {}).shot || (good(mobile) || {}).shot);
   r.thumbs = { d: await thumbOf((good(desktop) || {}).shot, 640), m: await thumbOf((good(mobile) || {}).shot, 240) };
@@ -483,6 +530,7 @@ async function runScan(raw, opt = {}) {
 }
 
 function open(r, from) {
+  PL.id = null;
   S.result = r; S.route = 'result'; S.sec = 'overview'; S.q = ''; S.cat = 'all'; S.more = false;
   render();
   window.scrollTo(0, 0);
@@ -501,6 +549,8 @@ function drawNav() {
     + b('overview', 'grid', 'Overview', res && S.sec === 'overview', none)
     + (S.result && S.result.vs ? b('compare', 'versus', 'Competitor', res && S.sec === 'compare') : '')
     + b('speed', 'gauge', 'Page speed', res && S.sec === 'speed', none)
+    + b('activity', 'pulse', 'Activity', res && S.sec === 'activity', none)
+    + b('seo', 'seo', 'SEO', res && S.sec === 'seo', none)
     + b('design', 'layout', 'Design', res && S.sec === 'design', none)
     + b('stack', 'layers', 'Tech stack', res && S.sec === 'stack', none)
     + b('findings', 'list', 'Findings', res && S.sec === 'findings', none)
@@ -561,7 +611,7 @@ function renderScan(domain, vsFor) {
   view.innerHTML = `<div class="top"><div class="crumb">Scans<i>&rsaquo;</i><b>${esc(domain)}</b></div></div>
     <div class="card start hasbuddy"><div class="start-main"><h1>Checking ${esc(domain)}</h1>
     <p>${vsFor ? `This is the competitor for ${esc(vsFor.domain)}. ` : ''}We check the homepage and the main pages around it, two at a time so we don\u2019t slow the website down. Blog posts are left out because they all share one layout. Keep this tab open until it finishes.</p>
-    <div class="steps">${[['site', 'Reading the site'], ['stack', 'Identifying the tech stack'], ['pages', 'Checking pages'], ['m', 'Measuring mobile speed'], ['d', 'Measuring desktop speed']].map(([id, t]) => `<div class="step" id="st-${id}"><span class="ic"></span><span>${t}</span><small></small></div>`).join('')}</div>
+    <div class="steps">${[['site', 'Reading the site'], ['stack', 'Identifying the tech stack'], ['pages', 'Checking pages'], ['seo', 'Reading blog posts for SEO'], ['m', 'Measuring mobile speed'], ['d', 'Measuring desktop speed']].map(([id, t]) => `<div class="step" id="st-${id}"><span class="ic"></span><span>${t}</span><small></small></div>`).join('')}</div>
     <div class="prog" id="prog" hidden><div class="track"><div class="bar"><i id="progbar"></i></div><img class="runner" id="runner" src="img/mascot/run.webp" alt=""></div><p id="progtext"></p><div id="progask"></div></div>
     <div class="sofar" id="sofar" hidden></div></div>${mascot('inspect', 'xl', 'blob')}</div>`;
   if (before) { const card = $('.start'); card.classList.add('swap'); resize(card, before); }
@@ -616,7 +666,7 @@ function step(id, st, note) {
   if (was !== st) { ic.dataset.st = st; ic.innerHTML = st === 'done' ? '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5" pathLength="1"/></svg>' : st === 'fail' ? '!' : ''; }
   if (note != null) el.querySelector('small').textContent = note;
   // the mascot on the scan screen changes with the job in hand
-  const pose = st === 'run' ? { site: 'inspect', stack: 'clipboard', pages: 'run' }[id] : id === 'pages' ? 'coffee' : '';
+  const pose = st === 'run' ? { site: 'inspect', stack: 'clipboard', pages: 'run', seo: 'underline' }[id] : id === 'seo' ? 'coffee' : '';
   if (pose) scanPose(pose);
 }
 function scanPose(pose) {
@@ -664,6 +714,148 @@ const LEGEND = '<div class="legend"><span><i class="dot m"></i>Mobile</span><spa
 const scoreGroups = (m, d) => LH.map(([k, n]) => ({ short: n, name: n, m: m && { score: m.scores[k], display: String(m.scores[k] ?? '–') }, d: d && { score: d.scores[k], display: String(d.scores[k] ?? '–') } }));
 const speedGroups = (m, d) => (m || d).metrics.map((x, i) => ({ short: x.short, name: `${x.name} (${x.short})`, m: m && m.metrics[i], d: d && d.metrics[i] }));
 const designOf = r => r.design || { tone: 'info', label: 'Not checked in this scan', note: 'Scan again to run the design checks.' };
+
+// ---------- website activity, Core Web Vitals, stability and SEO (rules and wording in extra.js)
+const MONTHS = { en: ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'], bm: ['Jan', 'Feb', 'Mac', 'Apr', 'Mei', 'Jun', 'Jul', 'Ogo', 'Sep', 'Okt', 'Nov', 'Dis'] };
+const TONE_WORD = { good: ['Good', 'Baik'], warn: ['Needs work', 'Perlu diperbaiki'], bad: ['Poor', 'Lemah'], info: ['No data', 'Tiada data'] };
+const toneWord = (t, lang) => TONE_WORD[t][lang === 'bm' ? 1 : 0];
+// New posts (purple) and new pages (pink) per month, for the last twelve months.
+function countSvg(months, lang = 'en') {
+  const W = 520, Hh = 230, L = 30, R = 6, T = 22, B = 30, pw = W - L - R, ph = Hh - T - B, gw = pw / months.length, bw = Math.min(13, gw * 0.3), gap = 2;
+  const top = Math.max(4, ...months.map(m => Math.max(m.posts, m.pages))), nice = Math.ceil(top / 4) * 4, y = v => T + ph - (v / nice) * ph;
+  const bar = (x, v, k, i) => { if (!v) return ''; const h = Math.max(3, (v / nice) * ph), rr = Math.min(4, h), yy = y(0) - h; return `<path class="bar ${k}" style="--i:${i}" d="M${x},${y(0)}V${yy + rr}Q${x},${yy} ${x + rr},${yy}H${x + bw - rr}Q${x + bw},${yy} ${x + bw},${yy + rr}V${y(0)}Z"/><text class="val" style="--i:${i}" x="${x + bw / 2}" y="${yy - 5}" text-anchor="middle">${v}</text>`; };
+  let out = `<svg viewBox="0 0 ${W} ${Hh}" role="img" aria-label="${lang === 'bm' ? 'Artikel dan halaman baharu setiap bulan' : 'New posts and pages each month'}">`;
+  for (const t of [0, nice / 2, nice]) out += `<line class="grid" x1="${L}" x2="${W - R}" y1="${y(t)}" y2="${y(t)}"/><text class="tick" x="${L - 8}" y="${y(t) + 4}" text-anchor="end">${t}</text>`;
+  months.forEach((m, i) => { const cx = L + gw * i + gw / 2; out += bar(cx - bw - gap / 2, m.posts, 'm', i) + bar(cx + gap / 2, m.pages, 'd', i) + `<text class="tick" x="${cx}" y="${Hh - 8}" text-anchor="middle">${MONTHS[lang === 'bm' ? 'bm' : 'en'][+m.k.slice(5) - 1]}</text>`; });
+  return out + '</svg>';
+}
+const ACT_LEGEND = (lang = 'en') => `<div class="legend"><span><i class="dot m"></i>${lang === 'bm' ? 'Artikel' : 'Posts'}</span><span><i class="dot d"></i>${lang === 'bm' ? 'Halaman' : 'Pages'}</span></div>`;
+const since = iso => { const n = Math.floor((Date.now() - Date.parse(iso)) / 864e5); return n <= 0 ? 'today' : n === 1 ? 'yesterday' : n < 60 ? `${n} days ago` : `${Math.round(n / 30.4)} months ago`; };
+const again = what => `<p class="note">${what} needs a fresh scan. Press Scan again at the top.</p>`;
+
+function activityHtml(r) {
+  const A = r.activity;
+  if (!A) return again('Website activity');
+  const a = activityOf(r);
+  if (!A.source) return `<div class="act-verdict">${mascot('shrug', 'md')}<div><h4>${dotted(a.tone, esc(a.label))}</h4><p class="ink2">${esc(a.line)}</p></div></div>`;
+  const span = `${MONTHS.en[+A.months[0].k.slice(5) - 1]} ${A.months[0].k.slice(0, 4)} to ${MONTHS.en[+A.months[11].k.slice(5) - 1]} ${A.months[11].k.slice(0, 4)}`;
+  return `<div class="act">
+      <div class="act-side">
+        <div class="act-verdict">${mascot(a.tone === 'good' ? 'thumbs' : a.tone === 'bad' ? 'coffee' : 'clipboard', 'md')}<div><h4>${dotted(a.tone, esc(a.label))}</h4><p class="ink2">${esc(a.line)}</p></div></div>
+        <div class="tiles3">
+          <div class="tile t1"><span>New posts this year</span><b>${a.posts12}</b><small>Last 12 months</small></div>
+          <div class="tile t3"><span>Last new post</span><b>${A.lastPost ? esc(since(A.lastPost)) : 'None yet'}</b>${A.lastPost ? `<small>${fmt(A.lastPost)}</small>` : ''}</div>
+          <div class="tile t4"><span>New pages</span><b>${a.newPages}</b><small>Last 3 months</small></div>
+        </div>
+      </div>
+      <div><div class="chart-head"><span class="label">New each month, ${esc(span)}</span>${ACT_LEGEND()}</div><div class="chart" id="chart-act">${countSvg(A.months)}</div></div>
+    </div>
+    <div class="newlist"><h4>Any new pages?</h4>${A.recent && A.recent.length ? `<ul>${A.recent.map(p => `<li><span class="chip">${p.kind === 'post' ? 'Post' : 'Page'}</span><a href="${esc(p.url)}" target="_blank" rel="noopener">${esc(p.title || new URL(p.url).pathname)}</a><small>${fmt(p.date)}</small></li>`).join('')}</ul>` : '<p class="muted">Nothing new in the last 3 months.</p>'}</div>
+    ${A.source === 'sitemap' ? '<p class="muted small">Dates come from the sitemap, so they show when a page last changed rather than when it first went up.</p>' : ''}`;
+}
+
+function vitalsHtml(r) {
+  const c = cwvOf(r);
+  if (!c.items.length) return `<p class="note">${esc(c.line)}</p>`;
+  return `<div class="cwv-top"><h4>${dotted(c.tone, esc(c.label))}</h4><p class="ink2">${esc(c.line)}</p></div>
+    <div class="cwv">${c.items.map(i => `<div class="cwv-i ${i.tone}"><span>${esc(i.name)}${i.stand ? ' <small>(lab)</small>' : ''}</span><b>${esc(i.value)}</b><em><i class="dot ${i.tone}"></i>${toneWord(i.tone)}</em><small>Good is ${esc(i.aim)}</small></div>`).join('')}</div>
+    ${r.crux ? `<div class="trends"><span class="label">Last 6 months, real visitors on phones</span>${trendSvg(r.crux)}</div>` : ''}`;
+}
+
+function stabilityHtml(r, trouble) {
+  if (!r.stab) return again('The stability check');
+  const st = stabilityOf(r, 'en', trouble);
+  return `<div class="cwv-top"><h4>${dotted(st.tone, esc(st.label))}</h4><p class="ink2">${esc(st.line)}</p></div>
+    <ul class="stab">${st.rows.map(x => `<li><i class="dot ${x.tone}"></i><span>${esc(x.text)}</span></li>`).join('')}</ul>
+    <p class="muted small">From this scan: we visited the homepage ${r.stab.tries ? r.stab.tries.length : 0} times and opened ${many(r.stab.pages || 0, 'page')}.</p>`;
+}
+
+function seoHtml(r) {
+  const o = seoOf(r);
+  if (!o) return r.seoRaw === undefined ? again('The SEO score') : '<p class="note">The site couldn’t be read, so there’s no SEO score.</p>';
+  return `<div class="seo-top">
+      <div class="seo-score"><span class="label">SEO score</span><div class="health"><b>${o.score ?? '–'}</b><span>out of 100</span></div><p class="tone ${o.tone}">${esc(o.label)}</p></div>
+      <div class="seo-parts">${o.parts.map(p => `<div class="sp"><div class="sp-head"><b>${esc(p.name)}</b><span>${p.score ?? '–'}</span></div><div class="sp-bar"><i class="${htone(p.score)}" style="width:${p.score || 0}%"></i></div>${p.line ? `<p>${esc(p.line)}</p>` : ''}</div>`).join('')}</div>
+    </div>`;
+}
+
+// ---------- "Is this post SEO friendly?": a Google preview and the post, with the weak spots marked, and the
+// mascot walking through them one at a time.
+const PL = { step: 0, id: null };
+const PL_POSE = ['point', 'inspect', 'underline', 'shrug', 'clipboard', 'point'];
+const plSteps = p => postChecks(p).filter(c => !c.ok).sort((a, b) => b.w - a.w).slice(0, 6);
+const crumbOf = p => { try { const u = new URL(p.url); return `${u.hostname.replace(/^www\./, '')}${u.pathname.split('/').filter(Boolean).map(x => ` › ${decodeURIComponent(x)}`).join('').slice(0, 70)}`; } catch { return p.url; } };
+const cut = (t, n) => (t.length > n ? t.slice(0, n - 1).replace(/\s+\S*$/, '') + '…' : t);
+function postHtml(r) {
+  const p = r.post;
+  if (!p) return r.post === undefined ? again('The close look at a blog post') : '<p class="note">We couldn’t find a blog post or a page to read up close.</p>';
+  const mk = (k, html) => `<span class="mk" data-k="${k}">${html}</span>`;
+  const when = p.modified || p.published;
+  return `<div class="pl">
+      <div class="pl-preview">
+        <span class="label">How it shows on Google</span>
+        <div class="serp">
+          <div class="serp-site"><i>${esc((r.domain[0] || '').toUpperCase())}</i>${mk('url', esc(crumbOf(p)))}</div>
+          <p class="serp-title">${mk('title', esc(p.title ? cut(p.title, 62) : '(no title)'))}</p>
+          <p class="serp-desc">${mk('desc', esc(p.desc ? cut(p.desc, 160) : 'No description, so Google picks some text from the page itself.'))}</p>
+        </div>
+        <span class="label">Inside the ${p.kind === 'page' ? 'page' : 'post'}</span>
+        <div class="doc">
+          <h4>${mk('h1', esc(p.h1 || '(no main heading)'))}</h4>
+          ${p.intro ? `<p>${mk('intro', esc(cut(p.intro, 260)))}</p>` : ''}
+          ${p.h2s.length ? `<div class="doc-h2">${mk('subheads', p.h2s.slice(0, 4).map(h => `<span>${esc(cut(h, 48))}</span>`).join(''))}</div>` : ''}
+          <div class="doc-facts">
+            ${mk('length', `${p.words} words`)}${p.h2s.length ? '' : mk('subheads', 'No subheadings')}
+            ${mk('images', `${many(p.imgs, 'picture')}${p.noAlt ? `, ${p.noAlt} undescribed` : ''}`)}
+            ${mk('links', `${many(p.internal, 'link')} to the site`)}
+            ${p.focus ? mk('keyword', `“${esc(p.focus)}” × ${p.kwCount}`) : ''}
+            ${when ? mk('fresh', `Updated ${fmt(when)}`) : ''}${mk('schema', p.schema ? 'Article details' : 'No article details')}
+          </div>
+        </div>
+        <a class="pl-open" href="${esc(p.url)}" target="_blank" rel="noopener">Open the ${p.kind === 'page' ? 'page' : 'post'}</a>
+      </div>
+      <div class="pl-guide" id="pl-guide"></div>
+    </div>
+    ${p.others && p.others.length ? `<p class="muted small pl-others">We also read ${many(p.others.length, 'other post')}, ${(lo => (hi => (lo === hi ? `${p.others.length === 1 ? 'scoring' : 'all scoring'} ${lo}` : `scoring ${lo} to ${hi}`))(Math.max(...p.others.map(o => o.score))))(Math.min(...p.others.map(o => o.score)))} out of 100. This one scored lowest (${p.score}).</p>` : ''}`;
+}
+function drawPost(hop) {
+  const r = S.result, p = r && r.post, box = $('#pl-guide'); if (!p || !box) return;
+  if (PL.id !== r.id) { PL.id = r.id; PL.step = 0; }
+  const steps = plSteps(p), last = steps.length + 1, i = Math.min(PL.step, last), kw = p.kw || { suggest: [], have: [] };
+  const word = p.kind === 'page' ? 'page' : 'post';
+  let pose = 'wave', html = '';
+  if (i === 0) {
+    pose = steps.length ? 'point' : 'thumbs';
+    html = steps.length ? `<p class="pl-big">${p.score >= 80 ? `This ${word} is mostly SEO friendly, but it could do better.` : `This ${word} isn’t very SEO friendly.`}</p><p>Wanna know why?</p><div class="pl-acts"><button type="button" class="btn primary" data-pl="next">Show me why</button></div>`
+      : `<p class="pl-big">This ${word} is SEO friendly. Nice work!</p><p>It ticks every box we check.</p>`;
+  } else if (i <= steps.length) {
+    const c = steps[i - 1]; pose = PL_POSE[(i - 1) % PL_POSE.length];
+    html = `<p class="pl-count">${i} of ${steps.length}</p><p class="pl-big">${esc(c.title)}</p><p>${esc(c.saw)} ${esc(c.why)}</p><p class="fix">${esc(c.fix)}</p>
+      <div class="pl-acts"><button type="button" class="btn soft" data-pl="back">Back</button><button type="button" class="btn primary" data-pl="next">${i === steps.length ? 'How do we fix it?' : 'Next'}</button></div>`;
+  } else {
+    pose = 'thumbs';
+    html = `<p class="pl-big">To help it rank, we’d use the words people actually search for.</p>
+      ${kw.suggest.length ? `<p>Like these, from Google’s own suggestions for “${esc(p.focus)}”:</p><div class="kws">${kw.suggest.map(x => `<span class="kw">${esc(x)}</span>`).join('')}</div>` : p.focus ? `<p>Starting with “${esc(p.focus)}” in the title, description, first lines and a subheading.</p>` : ''}
+      ${kw.have.length ? `<p class="muted small">Already in the ${word}: ${kw.have.map(esc).join(', ')}.</p>` : ''}
+      <div class="pl-acts"><button type="button" class="btn soft" data-pl="back">Back</button><button type="button" class="btn soft" data-pl="again">Start again</button></div>`;
+  }
+  box.innerHTML = `<div class="pl-say">${html}</div><span class="mascot md pl-face" aria-hidden="true"><img src="img/mascot/${pose}.webp" alt="" data-pose="${pose}"></span>
+    ${steps.length ? `<div class="pl-dots" aria-hidden="true">${Array.from({ length: last + 1 }, (_, k) => `<i class="${k === i ? 'on' : ''}"></i>`).join('')}</div>` : ''}`;
+  if (hop) boing($('.pl-face', box));
+  // the weak spots: every one is marked once the walk starts, and the one being explained is drawn over with the marker
+  const bad = new Set(steps.map(c => c.key)), cur = i >= 1 && i <= steps.length ? steps[i - 1].key : '';
+  view.querySelectorAll('.pl .mk').forEach(el => { el.classList.toggle('bad', i > 0 && bad.has(el.dataset.k)); el.classList.toggle('on', el.dataset.k === cur); });
+  const on = view.querySelector('.pl .mk.on');
+  if (on && narrow.matches) on.scrollIntoView({ behavior: calm.matches ? 'auto' : 'smooth', block: 'center' });
+}
+function plAct(a) {
+  const steps = plSteps(S.result.post);
+  if (a === 'next') PL.step = Math.min(PL.step + 1, steps.length + 1);
+  if (a === 'back') PL.step = Math.max(0, PL.step - 1);
+  if (a === 'again') PL.step = 0;
+  if (a.startsWith('k:')) { const k = steps.findIndex(c => c.key === a.slice(2)); if (k < 0) return; PL.step = k + 1; }
+  drawPost(true);
+}
 
 function renderResult() {
   const r = S.result, m = good(r.psi.mobile), d = good(r.psi.desktop), any = m || d, v = r.stack.verdict, h = r.health, dz = designOf(r), sh = shotsOf(r), tn = testNote(r);
@@ -728,6 +920,24 @@ function renderResult() {
         ${fasterHtml(r)}` : `<p class="note">No speed data. ${esc(perr)}</p>`}
     </div>
 
+    <div class="card" id="sec-activity">
+      <div class="card-head"><h3>${hd('pulse', 'cyan')}Website activity</h3><span class="muted">How often new posts and pages go up</span></div>
+      ${activityHtml(r)}
+    </div>
+    <div class="duo">
+      <div class="card" id="sec-vitals"><div class="card-head"><h3>${hd('gauge', 'purple')}Core Web Vitals</h3><span class="muted">Google’s three checks of how the site feels</span></div>${vitalsHtml(r)}</div>
+      <div class="card" id="sec-stability"><div class="card-head"><h3>${hd('check', 'yellow')}Stability</h3><span class="muted">Is it reliable, or likely to break?</span></div>${stabilityHtml(r, !!tn)}</div>
+    </div>
+
+    <div class="card" id="sec-seo">
+      <div class="card-head"><h3>${hd('seo', 'purple')}SEO</h3><span class="muted">How easy it is for Google to find, read and rank</span></div>
+      ${seoHtml(r)}
+    </div>
+    <div class="card" id="sec-post">
+      <div class="card-head"><h3>${hd('search', 'pink')}Is this ${r.post && r.post.kind === 'page' ? 'page' : 'post'} SEO friendly?</h3><span class="muted">${r.post ? (r.post.kind === 'page' ? 'There’s no blog, so here’s the weakest page' : `The weakest of the ${many(r.post.sample, 'blog post')} we read`) : ''}</span></div>
+      ${postHtml(r)}
+    </div>
+
     <div class="card peek" id="sec-design">${mascot('inspect', 'sm')}
       <div class="card-head"><h3>${hd('layout', 'pink')}Design</h3><span class="muted">What looks dated or broken, and what would lift it</span></div>
       <div class="stack">
@@ -774,6 +984,7 @@ function renderResult() {
     </div>`;
   if (any) { drawChart($('#chart-scores'), scoreGroups(m, d), { labels: true, bw: 22 }); drawChart($('#chart-speed'), speedGroups(m, d)); }
   if (r.vs) drawChart($('#chart-vs'), vsGroups(r), VS_CHART);
+  drawPost();
   drawRows();
   fresh('result'); floatIn();
 }
@@ -1079,6 +1290,8 @@ function buildReport(mode, o = {}) {
       ${faster.steps.length ? `<div class="rp-area rp-plan">${faster.steps.map((x, i) => `<p><b>${esc(T(x.title))}</b> <span class="d">(${esc([i === 0 ? T('Start here') : '', T(x.effort)].filter(Boolean).join(', '))})</span><br>${esc(T(x.why))} <i>${esc(T(x.how))}</i>${x.gain ? ` ${esc(T(x.gain))}` : ''}</p>`).join('')}</div>` : ''}
       ${faster.note ? `<p class="rp-note">${esc(T(faster.note))}</p>` : ''}` : ''}
 
+    ${extraReport(r, int, bm, tn)}
+
     <h2>${W('Design', 'Reka bentuk')}</h2>
     <div class="rp-box"><h3>${dotted(dz.tone, esc(T(dz.label)))}</h3><p>${esc(int ? dz.note : W('This comes from our checks for design that looks dated or broken.', 'Ini berdasarkan semakan kami terhadap reka bentuk yang nampak ketinggalan zaman atau rosak.'))}</p>
       ${r.palette && r.palette.length ? `<p class="rp-swatches">${W('Main colours on the first screen:', 'Warna utama pada skrin pertama:')} ${r.palette.map(p => `<span><i style="background:${esc(p.hex)}"></i>${esc(p.hex.toUpperCase())}</span>`).join('')}</p>` : ''}</div>
@@ -1106,6 +1319,43 @@ function buildReport(mode, o = {}) {
     ${int ? budgetHtml(r) : ''}
     <p class="rp-foot"><img class="rp-logo" src="img/mysense-light.png" alt="MYSense">${W(`Prepared by MYSense, mysense.com.my. ${r.pagesChecked ? `${r.pagesChecked} public ${r.pagesChecked === 1 ? 'page was' : 'pages were'} checked on ${day(r.date)}. ` : ''}Speed scores come from Google PageSpeed Insights (Lighthouse); lab results vary slightly between runs. Technology is read from public page code, so hidden components may not appear.`,
       `Disediakan oleh MYSense, mysense.com.my. ${r.pagesChecked ? `${r.pagesChecked} halaman awam disemak pada ${day(r.date)}. ` : ''}Skor kelajuan datang daripada Google PageSpeed Insights (Lighthouse); keputusan makmal berbeza sedikit antara ujian. Teknologi dibaca daripada kod halaman awam, jadi komponen tersembunyi mungkin tidak kelihatan.`)}</p>`;
+}
+// Website activity, Core Web Vitals, stability, the SEO score and the close look at one post, for the reports.
+function extraReport(r, int, bm, trouble) {
+  const lang = bm ? 'bm' : 'en', W = (en, my) => (bm ? my : en), day = iso => new Date(iso).toLocaleDateString(bm ? 'ms-MY' : 'en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
+  let out = '';
+  const A = r.activity;
+  if (A && A.source) {
+    const a = activityOf(r, lang);
+    out += `<h2>${W('Website activity', 'Aktiviti laman web')}</h2><div class="rp-act"><div><p class="rp-verdict">${dotted(a.tone, esc(a.label))}</p><p class="rp-sum">${esc(a.line)}</p>
+      <div class="rp-tiles"><p>${W('New posts, last 12 months', 'Artikel baharu, 12 bulan lepas')}<b>${a.posts12}</b></p><p>${W('Last new post', 'Artikel baharu terakhir')}<b>${A.lastPost ? day(A.lastPost) : W('None', 'Tiada')}</b></p><p>${W('New pages, last 3 months', 'Halaman baharu, 3 bulan lepas')}<b>${a.newPages}</b></p></div></div>
+      <div><p class="rp-cap">${W('New each month', 'Baharu setiap bulan')}</p><div class="chart">${countSvg(A.months, lang)}</div><p class="rp-legend"><i class="dot m"></i>${W('Posts', 'Artikel')} &nbsp; <i class="dot d"></i>${W('Pages', 'Halaman')}</p></div></div>
+      ${A.recent && A.recent.length ? `<p class="rp-list"><b>${W('New in the last 3 months:', 'Baharu dalam 3 bulan lepas:')}</b> ${A.recent.slice(0, 5).map(p => `${esc(p.title || new URL(p.url).pathname)} (${day(p.date)})`).join('; ')}.</p>` : ''}
+      ${A.source === 'sitemap' ? `<p class="rp-note">${W('Dates come from the sitemap, so they show when a page last changed.', 'Tarikh diambil daripada peta laman, jadi ia menunjukkan bila halaman terakhir diubah.')}</p>` : ''}`;
+  }
+  const c = cwvOf(r, lang), st = r.stab ? stabilityOf(r, lang, trouble) : null;
+  if (c.items.length || st) {
+    out += `<div class="rp-two" style="margin-top:16pt">`;
+    if (c.items.length) out += `<div class="rp-box"><h3>Core Web Vitals: ${dotted(c.tone, esc(c.label))}</h3><p>${esc(c.line)}</p><ul>${c.items.map(i => `<li>${esc(i.name)}: <b>${esc(i.value)}</b>, ${toneWord(i.tone, lang).toLowerCase()} (${W('good is', 'baik jika')} ${esc(i.aim)})</li>`).join('')}</ul>
+      ${r.crux ? `<p class="rp-cap" style="margin-top:6pt">${W('Last 6 months, real visitors on phones', '6 bulan lepas, pelawat sebenar di telefon')}</p><div class="rp-trend">${trendSvg(r.crux, lang)}</div>` : ''}</div>`;
+    if (st) out += `<div class="rp-box"><h3>${W('Stability', 'Kestabilan')}: ${dotted(st.tone, esc(st.label))}</h3><p>${esc(st.line)}</p><ul>${st.rows.map(x => `<li>${dotted(x.tone, esc(x.text))}</li>`).join('')}</ul></div>`;
+    out += '</div>';
+  }
+  const o = seoOf(r, lang);
+  if (o) {
+    out += `<h2>${W('SEO score', 'Skor SEO')}: ${o.score} ${W('out of 100', 'daripada 100')}</h2><p class="rp-verdict">${dotted(o.tone, esc(o.label))}</p>
+      <table class="rp-seo" style="margin-top:6pt"><tbody>${o.parts.filter(p => p.score != null).map(p => `<tr><td><b>${esc(p.name)}</b></td><td>${dotted(htone(p.score), p.score)}</td><td>${esc(p.line)}</td></tr>`).join('')}</tbody></table>`;
+  }
+  const p = r.post;
+  if (p) {
+    const fails = postChecks(p, lang).filter(x => !x.ok).sort((a, b) => b.w - a.w).slice(0, 6), word = p.kind === 'page' ? W('page', 'halaman') : W('post', 'artikel');
+    out += `<h2>${W(`A closer look at one ${word}`, `Melihat lebih dekat satu ${word}`)}</h2>
+      <p class="rp-sum">${p.kind === 'page' ? W('There’s no blog, so we looked at the weakest page.', 'Tiada blog, jadi kami melihat halaman yang paling lemah.') : W(`The weakest of the ${p.sample} blog posts we read, scoring ${p.score} out of 100.`, `Yang paling lemah daripada ${p.sample} artikel blog yang kami baca, dengan skor ${p.score} daripada 100.`)}</p>
+      <div class="rp-serp" style="margin-top:8pt"><div class="s1">${esc(crumbOf(p))}</div><div class="s2">${esc(p.title ? cut(p.title, 62) : W('(no title)', '(tiada tajuk)'))}</div><div class="s3">${esc(p.desc ? cut(p.desc, 160) : W('No description, so Google picks some text from the page.', 'Tiada penerangan, jadi Google memilih teks daripada halaman.'))}</div></div>
+      ${fails.length ? `<div class="rp-area">${fails.map(x => `<p><b>${esc(x.title)}.</b> ${esc(x.saw)} ${esc(x.why)} <i>${esc(x.fix)}</i></p>`).join('')}</div>` : `<p>${W('It ticks every box we check.', 'Ia memenuhi semua semakan kami.')}</p>`}
+      ${p.kw && p.kw.suggest.length ? `<div class="rp-box" style="margin-top:8pt"><h3>${W('Words people search for', 'Perkataan yang dicari orang')}</h3><p>${W(`From Google’s own suggestions for “${esc(p.focus)}”. We’d work these into the ${word}:`, `Daripada cadangan Google sendiri untuk “${esc(p.focus)}”. Kami akan masukkan ini ke dalam ${word}:`)}</p><p class="rp-kws">${p.kw.suggest.map(k => `<span>${esc(k)}</span>`).join('')}</p></div>` : ''}`;
+  }
+  return out;
 }
 function printReport(mode, o = {}) {
   if (!S.result) return;
@@ -1205,7 +1455,7 @@ function go(to) {
 }
 
 // The menu follows the page (it is sticky in the styles) and marks the section you are reading.
-const SPY = ['overview', 'speed', 'compare', 'design', 'stack', 'findings', 'steps'];
+const SPY = ['overview', 'speed', 'compare', 'activity', 'seo', 'design', 'stack', 'findings', 'steps'];
 let spyHold = 0, spyWait = 0;
 function spy() {
   spyWait = 0;
@@ -1222,6 +1472,10 @@ document.addEventListener('click', e => {
   if (modal.classList.contains('out') && modal.contains(e.target)) return;   // a dialog that is closing takes no more presses
   const bud = e.target.closest('[data-buddy]');
   if (bud) return buddyAct(bud.dataset.buddy);
+  const pl = e.target.closest('[data-pl]');
+  if (pl) return plAct(pl.dataset.pl);
+  const mark = e.target.closest('.pl .mk.bad');
+  if (mark) return plAct('k:' + mark.dataset.k);
   const pet = e.target.closest('.mascot');
   if (pet) return pat(pet);
   const t = e.target.closest('[data-go],[data-open],[data-remove],[data-rescan],[data-act],#more');
@@ -1318,8 +1572,8 @@ function pat(el) {
 // The mascot waits in the corner, changes pose with the section being read, and hops when the section changes.
 // A tap gives the short version of that section and a button to the next one. "Hide me" tucks it away at the
 // bottom edge (remembered in this browser); a tap on the part that still shows brings it back.
-const BUDDY_ORDER = ['overview', 'compare', 'speed', 'design', 'stack', 'findings', 'steps'];
-const SEC_NAME = { overview: 'Overview', compare: 'Competitor', speed: 'Page speed', design: 'Design', stack: 'Tech stack', findings: 'Findings', steps: 'Next steps' };
+const BUDDY_ORDER = ['overview', 'compare', 'speed', 'activity', 'seo', 'design', 'stack', 'findings', 'steps'];
+const SEC_NAME = { overview: 'Overview', compare: 'Competitor', speed: 'Page speed', activity: 'Activity', seo: 'SEO', design: 'Design', stack: 'Tech stack', findings: 'Findings', steps: 'Next steps' };
 const narrow = window.matchMedia('(max-width: 820px)');
 const buddy = document.body.appendChild(Object.assign(document.createElement('div'), { id: 'buddy', className: 'buddy', hidden: true }));
 buddy.innerHTML = `<div class="buddy-say" role="status" hidden><button type="button" class="buddy-x" data-buddy="shut" aria-label="Close">${icon('x')}</button><p></p><div class="buddy-acts"></div></div>
@@ -1339,6 +1593,16 @@ function buddyLine(sec, r) {
     const f = speedPlan(r), ps = m ? m.scores.performance : null, ds = d ? d.scores.performance : null;
     if (ps == null && ds == null) return ['run', 'Google couldn\u2019t test the speed this time. Try the scan again later.'];
     return ['run', `${ps != null ? `Phones score ${ps} out of 100${ds != null ? `, computers ${ds}` : ''}` : `Computers score ${ds} out of 100`}. ${f && f.steps.length ? `The biggest win is \u201c${f.steps[0].title}\u201d.` : 'Speed is in good shape.'}`];
+  }
+  if (sec === 'activity') {
+    if (!r.activity) return ['coffee', 'Scan again to see how often this site gets new posts.'];
+    const a = activityOf(r), st = r.stab ? stabilityOf(r, 'en', !!testTrouble(r)) : null;
+    return [a.tone === 'good' ? 'thumbs' : 'clipboard', `${a.label}. ${a.line}${st ? ` Stability: ${st.label.toLowerCase()}.` : ''}`];
+  }
+  if (sec === 'seo') {
+    const o = seoOf(r);
+    if (!o) return ['shrug', 'No SEO score for this scan.'];
+    return ['underline', `SEO scores ${o.score} out of 100. ${r.post ? 'Tap “Show me why” below and I’ll walk you through one post.' : ''}`];
   }
   if (sec === 'design') { const dz = designOf(r), k = r.issues.filter(i => i.cat === 'Design').length; return ['inspect', `${dz.label}. ${k ? `${many(k, 'design point')} below, grouped by area.` : 'Nothing dated or broken turned up.'}`]; }
   if (sec === 'stack') {
