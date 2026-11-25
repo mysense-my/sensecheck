@@ -12,6 +12,7 @@
 //   /api/fetch?url=           streams a public page back as plain text, with metadata in a header
 //   /api/fetch?url=&head=1    returns only the metadata (used to read image file sizes)
 //   /api/psi?url=&strategy=   proxies Google PageSpeed Insights and adds the API key
+//   /api/crux?url=&form=      six months of real-visitor Core Web Vitals (Chrome UX Report history, same key)
 //   /logout                   locks this browser again
 //   everything else           the app in /public
 // All analysis happens in the browser (public/analyze.js, public/audit.js), so this stays tiny and cheap on CPU.
@@ -25,7 +26,7 @@ const KEEP = ['server', 'x-powered-by', 'x-generator', 'via', 'cf-ray', 'cf-cach
   'x-drupal-dynamic-cache', 'x-aspnet-version', 'x-aspnetmvc-version', 'x-vercel-id', 'x-nf-request-id',
   'x-github-request-id', 'x-served-by', 'x-turbo-charged-by', 'content-length', 'content-security-policy',
   'x-frame-options', 'x-content-type-options', 'referrer-policy', 'permissions-policy', 'cf-mitigated', 'x-sucuri-id',
-  'x-sucuri-block', 'x-iinfo', 'x-cdn', 'x-amz-cf-id', 'x-amzn-waf-action', 'www-authenticate', 'retry-after'];
+  'x-sucuri-block', 'x-iinfo', 'x-cdn', 'x-amz-cf-id', 'x-amzn-waf-action', 'www-authenticate', 'retry-after', 'x-wp-total', 'x-wp-totalpages'];
 
 const json = (body, status = 200, extra = {}) => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json', 'cache-control': 'no-store', ...extra } });
 
@@ -225,6 +226,17 @@ async function psi(u, strategy, env) {
   return new Response(res.body, { status: res.status, headers: { 'content-type': 'application/json', 'cache-control': 'no-store' } });
 }
 
+// Real-visitor Core Web Vitals history for the whole site (about six months, one point a week). Uses the same
+// Google key as the speed test; the Chrome UX Report API has to be switched on for that key's project.
+async function crux(u, form, env) {
+  if (!env.PSI_KEY) return json({ error: 'no key' }, 400);
+  const res = await fetch('https://chromeuxreport.googleapis.com/v1/records:queryHistoryRecord?key=' + encodeURIComponent(env.PSI_KEY), {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ origin: u.origin, formFactor: form === 'desktop' ? 'DESKTOP' : 'PHONE', metrics: ['largest_contentful_paint', 'interaction_to_next_paint', 'cumulative_layout_shift'] }),
+  });
+  return new Response(res.body, { status: res.status, headers: { 'content-type': 'application/json', 'cache-control': 'no-store' } });
+}
+
 // ---------- AI design opinion (optional)
 // Only works once the secret ANTHROPIC_API_KEY is set; until then /api/me reports ai: false and the button is hidden.
 // One call to the Claude Messages API per click: the screenshots go in as images and a short structured opinion
@@ -303,6 +315,7 @@ export default {
     if (!u) return json({ error: 'Enter a public website address' }, 400);
     if (url.pathname === '/api/fetch') return proxy(u, url.searchParams.has('head'));
     if (url.pathname === '/api/psi') return psi(u, url.searchParams.get('strategy'), env);
+    if (url.pathname === '/api/crux') return crux(u, url.searchParams.get('form'), env);
     return json({ error: 'not found' }, 404);
   },
 };

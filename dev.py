@@ -31,7 +31,7 @@ KEEP = ['server', 'x-powered-by', 'x-generator', 'via', 'cf-ray', 'cf-cache-stat
         'x-nf-request-id', 'x-github-request-id', 'x-served-by', 'x-turbo-charged-by', 'content-length',
         'content-security-policy', 'x-frame-options', 'x-content-type-options', 'referrer-policy', 'permissions-policy',
         'cf-mitigated', 'x-sucuri-id', 'x-sucuri-block', 'x-iinfo', 'x-cdn', 'x-amz-cf-id', 'x-amzn-waf-action',
-        'www-authenticate', 'retry-after']
+        'www-authenticate', 'retry-after', 'x-wp-total', 'x-wp-totalpages']
 
 
 def load():
@@ -107,6 +107,8 @@ class Handler(SimpleHTTPRequestHandler):
             return self.proxy(url, 'head' in q)
         if u.path == '/api/psi':
             return self.psi(url, q.get('strategy', ['mobile'])[0])
+        if u.path == '/api/crux':
+            return self.crux(url, q.get('form', ['phone'])[0])
         return super().do_GET()
 
     def do_GET(self):
@@ -186,6 +188,22 @@ class Handler(SimpleHTTPRequestHandler):
             res = e
         except Exception as e:
             return self.out(502, {'error': {'message': str(e)}})
+        self.out(res.getcode(), res.read(), 'application/json')
+
+    def crux(self, url, form):
+        if not os.environ.get('PSI_KEY'):
+            return self.out(400, {'error': 'no key'})
+        o = urllib.parse.urlsplit(url)
+        body = json.dumps({'origin': '%s://%s' % (o.scheme, o.netloc), 'formFactor': 'DESKTOP' if form == 'desktop' else 'PHONE',
+                           'metrics': ['largest_contentful_paint', 'interaction_to_next_paint', 'cumulative_layout_shift']}).encode()
+        req = urllib.request.Request('https://chromeuxreport.googleapis.com/v1/records:queryHistoryRecord?key=' + urllib.parse.quote(os.environ['PSI_KEY']),
+                                     data=body, headers={'Content-Type': 'application/json'})
+        try:
+            res = urllib.request.urlopen(req, timeout=30)
+        except urllib.error.HTTPError as e:
+            res = e
+        except Exception as e:
+            return self.out(502, {'error': str(e)})
         self.out(res.getcode(), res.read(), 'application/json')
 
 

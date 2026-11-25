@@ -1,6 +1,7 @@
 // SenseCheck audit: page facts, issues, strengths, health score, skills fit and next steps.
 // Rule lists (placeholder phrases, thresholds, packages, Skills Matrix) live in config.json.
 import { SPEED_FIX, FRIENDLY } from './analyze.js';
+import { seoOf } from './extra.js';
 
 const YEAR = new Date().getFullYear();
 const COST = { Critical: 30, High: 18, Medium: 10, Low: 4 };
@@ -80,6 +81,7 @@ export function readPage(url, status, html, cfg) {
     title: ((doc.querySelector('title') || {}).textContent || '').replace(/\s+/g, ' ').trim(),
     desc: ((doc.querySelector('meta[name="description" i]') || { getAttribute: () => '' }).getAttribute('content') || '').trim(),
     canonical: !!doc.querySelector('link[rel~="canonical" i]'),
+    noindex: /noindex/i.test([...doc.querySelectorAll('meta[name="robots" i],meta[name="googlebot" i]')].map(m => m.getAttribute('content') || '').join(' ')),
     viewport: !!doc.querySelector('meta[name="viewport" i]'),
     og: !!doc.querySelector('meta[property="og:image" i]'), ld,
     h1: heads.filter(x => x === 1).length, skipped: heads.some((x, i) => i > 0 && x > heads[i - 1] + 1),
@@ -344,9 +346,10 @@ export function healthOf(r) {
   const avg = (...v) => { v = v.filter(x => x != null); return v.length ? Math.round(v.reduce((a, b) => a + b, 0) / v.length) : null; };
   const m = ok(r.psi.mobile), d = ok(r.psi.desktop), html = r.pages.length > 0;
   const pm = m ? m.scores.performance : null, pd = d ? d.scores.performance : null;
+  const seo = seoOf(r);
   const sub = {
     Performance: pm != null && pd != null ? Math.round(pm * 0.7 + pd * 0.3) : pm != null ? pm : pd,
-    SEO: avg(html ? pen('SEO') : null, m ? m.scores.seo : null),
+    SEO: seo && seo.score != null ? seo.score : avg(html ? pen('SEO') : null, m ? m.scores.seo : null),   // the SEO score from extra.js when the scan has one
     Content: html ? pen('Content') : null,
     Images: html ? pen('Images') : null,
     Design: html ? pen('Design') : null,
